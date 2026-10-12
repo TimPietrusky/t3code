@@ -122,8 +122,14 @@ function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+    <SidebarInset
+      data-t3-part="main"
+      className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate"
+    >
+      <div
+        data-t3-part="settings"
+        className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
+      >
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
             <SettingsBreadcrumb pathname={location.pathname} />

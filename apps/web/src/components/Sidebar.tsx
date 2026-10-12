@@ -696,6 +696,7 @@ function SortableSidebarMarker(props: {
   className?: string;
   children?: ReactNode;
   "data-testid"?: string;
+  "data-t3-part"?: string;
 }) {
   const { setNodeRef, transform, transition } = useSortable({
     id: sidebarMarkerId(props.marker),
@@ -707,6 +708,7 @@ function SortableSidebarMarker(props: {
       ref={setNodeRef}
       data-thread-selection-safe
       data-testid={props["data-testid"]}
+      data-t3-part={props["data-t3-part"]}
       className={cn("list-none", props.className)}
       style={{
         transform: CSS.Translate.toString(transform),
@@ -815,6 +817,7 @@ function SidebarSectionHeader(props: {
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
+      data-t3-part="sidebar-section-header"
       className={cn("mx-0.5 h-8", props.className)}
     >
       <CollapsibleSectionHeader
@@ -925,9 +928,14 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
           <div className="flex h-5 min-w-0 items-center gap-1.5">
             <SquarePenIcon aria-hidden className={draftPenClassName} />
             {props.project ? (
-              <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+              <span data-t3-part="project-icon" className="contents">
+                <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+              </span>
             ) : null}
-            <span className="min-w-0 flex-1 truncate text-xs font-medium text-secondary-label">
+            <span
+              data-t3-part="project-name"
+              className="min-w-0 flex-1 truncate text-xs font-medium text-secondary-label"
+            >
               {props.projectDisplayName}
             </span>
             <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
@@ -1672,6 +1680,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     ) : (
       <span
         aria-hidden
+        data-t3-part="thread-title"
         className={cn(
           "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
           shouldRecede ? "font-normal" : "font-medium",
@@ -1703,6 +1712,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       </span>
     );
   const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
+  // Hidden by default; a theme reveals it to show the project on the row itself.
+  // A direct child of the (position: relative) row so it can be placed freely.
+  const projectSlot = props.projectDisplayName ? (
+    <span aria-hidden data-t3-part="thread-project" className="hidden">
+      {props.projectDisplayName}
+    </span>
+  ) : null;
 
   // Stacks show their layer count; multiple unrelated links show their total count.
   // Either opens the thread's pull requests tab; a single PR link opens that PR and still
@@ -1794,6 +1810,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     return (
       <li
         data-thread-item={threadKey}
+        data-t3-part="thread-item"
+        data-t3-variant="slim"
         {...sortableRootProps}
         {...(fileDropHandlers ?? {})}
         className={cn(
@@ -1812,6 +1830,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 aria-label={accessibility.label}
                 aria-current={accessibility.current}
                 data-testid="sidebar-row-slim"
+                data-t3-part="thread-row"
+                data-t3-variant="slim"
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
                 onClick={handleClick}
@@ -1822,9 +1842,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             }
           >
             {accessibleTitle}
+            {projectSlot}
             {/* Settled history recedes: dimmed favicon at rest, restored on
               hover so the tail stays scannable when you're hunting. */}
             <span
+              data-t3-part="project-icon"
               className={cn(
                 "flex shrink-0 items-center transition-opacity",
                 (!props.isActive || variantAction === "unsettle") &&
@@ -1850,6 +1872,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               dragDestination
             ) : (
               <span
+                data-t3-part="thread-status"
                 className={cn(
                   "relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end",
                   props.sweepAction !== null && "hidden",
@@ -1959,6 +1982,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   return (
     <li
       data-thread-item={threadKey}
+      data-t3-part="thread-item"
+      data-t3-variant="card"
       {...sortableRootProps}
       {...(fileDropHandlers ?? {})}
       className={cn(
@@ -1977,6 +2002,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               aria-label={accessibility.label}
               aria-current={accessibility.current}
               data-testid="sidebar-row-card"
+              data-t3-part="thread-row"
+              data-t3-variant="card"
               aria-busy={isRegeneratingTitle || undefined}
               className={rowSurfaceClassName}
               onClick={handleClick}
@@ -1987,14 +2014,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           }
         >
           {accessibleTitle}
-          <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
-            <div className="flex h-5 min-w-0 items-center gap-1.5">
+          {projectSlot}
+          <div
+            data-t3-part="thread-body"
+            className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)"
+          >
+            <div data-t3-part="thread-header" className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
               {props.project ? (
-                <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+                <span data-t3-part="project-icon" className="contents">
+                  <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+                </span>
               ) : null}
               {props.projectDisplayName ? (
                 <span
+                  data-t3-part="project-name"
                   className={cn(
                     "min-w-0 flex-1 truncate text-secondary-label text-xs",
                     shouldRecede ? "font-normal" : "font-medium",
@@ -2014,6 +2048,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 dragDestination
               ) : (
                 <span
+                  data-t3-part="thread-status"
                   className={cn(
                     "group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs",
                     props.sweepAction !== null && "hidden",
@@ -2158,7 +2193,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 </span>
               ) : null}
             </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+            <div
+              data-t3-part="thread-meta"
+              className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs"
+            >
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
@@ -5053,6 +5091,7 @@ export default function Sidebar() {
       <ThreadContextDragGhost />
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
+        data-t3-part="sidebar-content"
         className="min-h-full"
         fixedHeader={
           // Lifted above the stage backdrop, whose fade bleeds below the

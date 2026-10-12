@@ -50,6 +50,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   return (
     // The titlebar row, not a padded SidebarHeader: it aligns to the window controls.
     <div
+      data-t3-part="sidebar-header"
       className={cn(
         "relative flex h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center gap-2 pr-3",
         isElectron && "drag-region",
@@ -242,7 +243,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
-    <SidebarFooter>
+    <SidebarFooter data-t3-part="sidebar-footer">
       <SidebarThreadUndoNotice />
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />

@@ -1597,6 +1597,7 @@ export default function ThreadTerminalDrawer({
   return (
     <aside
       data-thread-terminal-drawer
+      data-t3-part="terminal-drawer"
       data-terminal-owner={isPanel ? "right-panel" : "drawer"}
       className={cn(
         "relative flex min-w-0 flex-col overflow-hidden bg-background",
