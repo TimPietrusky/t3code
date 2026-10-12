@@ -59,7 +59,7 @@ export function ThemeCssEditor({
           isOverLimit ? "text-destructive" : "text-muted-foreground",
         )}
       >
-        <span>Previews live. Applies in light and dark; scope with :root.dark.</span>
+        <span>Live preview. Scope dark-only rules with :root.dark.</span>
         <span className="shrink-0 tabular-nums">
           {value.length.toLocaleString()} / {MAX_THEME_CSS_LENGTH.toLocaleString()}
         </span>
