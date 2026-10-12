@@ -68,6 +68,7 @@ export function environmentThemeDefinition(theme: EnvironmentTheme): ThemeDefini
     theme.variants === undefined
       ? { managed: true }
       : {}),
+    ...(theme.css !== undefined && theme.css.trim().length > 0 ? { css: theme.css } : {}),
   };
 }
 

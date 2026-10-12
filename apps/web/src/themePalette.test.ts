@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { converter } from "culori/fn";
 import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
 
+import { MAX_THEME_CSS_LENGTH } from "@t3tools/contracts";
+
 import {
   applyThemeColorPreview,
+  applyThemeCss,
   applyThemePalette,
   getThemeColorsForMode,
   getThemeDefinition,
@@ -40,6 +43,7 @@ import {
   getDefaultThemeColors,
   themeColorToHex,
   toCanonicalThemeColor,
+  THEME_CSS_ELEMENT_ID,
   THEME_FILE_VERSION,
   singleAppearanceOf,
 } from "./themePalette";
@@ -1167,5 +1171,166 @@ describe("singleAppearanceOf", () => {
     const { variants: _pair, ...base } = T3_CHAT_THEME;
     expect(singleAppearanceOf({ ...base, id: "x", appearance: "dark" })).toBe("dark");
     expect(singleAppearanceOf(T3_CHAT_THEME)).toBe(null);
+  });
+});
+
+describe("theme css", () => {
+  const PINK_CSS = '[data-t3-part="thread-title"] { white-space: normal; }';
+
+  /** The slice of the DOM applyThemeCss touches: one <style> found by id in <body>. */
+  function stubThemeCssDocument() {
+    type StyleStub = {
+      id: string;
+      textContent: string | null;
+      readonly isConnected: boolean;
+      remove: () => void;
+    };
+    const body: StyleStub[] = [];
+    const makeStyle = (): StyleStub => {
+      const element: StyleStub = {
+        id: "",
+        textContent: null,
+        get isConnected(): boolean {
+          return body.includes(element);
+        },
+        remove: () => {
+          body.splice(body.indexOf(element), 1);
+        },
+      };
+      return element;
+    };
+    vi.stubGlobal("document", {
+      body: { append: (element: StyleStub) => body.push(element) },
+      createElement: () => makeStyle(),
+      getElementById: (id: string) => body.find((element) => element.id === id) ?? null,
+      documentElement: {
+        classList: { toggle: vi.fn() },
+        dataset: {} as Record<string, string | undefined>,
+        style: { removeProperty: vi.fn(), setProperty: vi.fn() },
+      },
+    });
+    return body;
+  }
+
+  it("round-trips css through exported theme files", () => {
+    const theme = parseThemeFile({
+      version: THEME_FILE_VERSION,
+      name: "Pink Love",
+      appearance: "light",
+      colors: { canvas: "#fff0f6" },
+      css: PINK_CSS,
+    });
+    expect(theme.css).toBe(PINK_CSS);
+    const restored = parseThemeFile(JSON.parse(serializeThemeFile(theme)));
+    expect(restored.css).toBe(PINK_CSS);
+  });
+
+  it("omits blank css and keeps files without css unchanged", () => {
+    const blank = parseThemeFile({
+      version: THEME_FILE_VERSION,
+      name: "Blank",
+      appearance: "dark",
+      colors: { canvas: "#101010" },
+      css: "  \n ",
+    });
+    expect(blank).not.toHaveProperty("css");
+    expect(JSON.parse(serializeThemeFile(blank))).not.toHaveProperty("css");
+  });
+
+  it("rejects css that is not a string or exceeds the limit", () => {
+    const file = {
+      version: THEME_FILE_VERSION,
+      name: "Big",
+      appearance: "dark",
+      colors: { canvas: "#101010" },
+    };
+    expect(() => parseThemeFile({ ...file, css: 42 })).toThrow("Theme CSS must be a string.");
+    expect(() => parseThemeFile({ ...file, css: "a".repeat(MAX_THEME_CSS_LENGTH + 1) })).toThrow(
+      /limited to 16 KB/,
+    );
+    expect(parseThemeFile({ ...file, css: "a".repeat(MAX_THEME_CSS_LENGTH) }).css).toHaveLength(
+      MAX_THEME_CSS_LENGTH,
+    );
+  });
+
+  it("drops unusable stored css without losing the theme", () => {
+    const stored = [
+      {
+        id: "loud",
+        label: "Loud",
+        appearance: "dark",
+        colors: { canvas: "#101010" },
+        css: "a".repeat(MAX_THEME_CSS_LENGTH + 1),
+      },
+      { id: "quiet", label: "Quiet", appearance: "dark", colors: {}, css: PINK_CSS },
+    ];
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) =>
+          key === CUSTOM_THEMES_STORAGE_KEY ? JSON.stringify(stored) : null,
+      },
+    });
+    invalidateCustomThemes();
+    try {
+      const themes = getCustomThemes();
+      expect(themes.map((theme) => theme.id)).toEqual(["loud", "quiet"]);
+      expect(themes[0]).not.toHaveProperty("css");
+      expect(themes[1]?.css).toBe(PINK_CSS);
+    } finally {
+      vi.unstubAllGlobals();
+      invalidateCustomThemes();
+    }
+  });
+
+  it("keeps a single theme stylesheet in the body and removes it when cleared", () => {
+    const body = stubThemeCssDocument();
+    try {
+      applyThemeCss(PINK_CSS);
+      applyThemeCss(`${PINK_CSS} /* edited */`);
+      expect(body).toHaveLength(1);
+      expect(body[0]).toMatchObject({
+        id: THEME_CSS_ELEMENT_ID,
+        textContent: `${PINK_CSS} /* edited */`,
+      });
+
+      applyThemeCss("   ");
+      expect(body).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("follows the applied theme: its css lands with the palette and leaves with it", () => {
+    const themed = {
+      id: "pink-love",
+      label: "Pink Love",
+      appearance: "light",
+      colors: { canvas: "#fff0f6" },
+      variants: { dark: { canvas: "#2a0f1d" } },
+      css: PINK_CSS,
+    };
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) =>
+          key === CUSTOM_THEMES_STORAGE_KEY ? JSON.stringify([themed]) : null,
+      },
+    });
+    invalidateCustomThemes();
+    const body = stubThemeCssDocument();
+    try {
+      applyThemePalette("pink-love", "dark");
+      expect(body[0]?.textContent).toBe(PINK_CSS);
+
+      // Switching to a theme without css (here a built-in) removes the sheet.
+      applyThemePalette(GROVE_THEME.id, "dark");
+      expect(body).toHaveLength(0);
+
+      applyThemePalette("pink-love", "light");
+      applyThemePalette("system");
+      expect(body).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+      invalidateCustomThemes();
+    }
   });
 });

@@ -47,6 +47,12 @@ describe("environment themes", () => {
     expect(overridden.colors.sidebar).toBe(generated.colors.sidebar);
   });
 
+  it("carries published css and drops a blank stylesheet", () => {
+    const styled = environmentThemeDefinition({ ...NIGHTFALL_THEME, css: "body { color: red; }" });
+    expect(styled.css).toBe("body { color: red; }");
+    expect(environmentThemeDefinition({ ...NIGHTFALL_THEME, css: "  " })).not.toHaveProperty("css");
+  });
+
   // The standard exported theme file — the Download button's output — is a
   // valid published theme, so any shared theme can be dropped into the
   // machine's themes directory as-is.

@@ -123,6 +123,11 @@ export type ThemeDefinition = Readonly<{
   sidebarArtwork?: boolean;
   /** Generated from the guided editor's canvas and accent roles. */
   managed?: boolean;
+  /**
+   * Web and desktop only: a stylesheet appended after the app's own styles
+   * while this theme renders either appearance. Mobile ignores it.
+   */
+  css?: string;
 }>;
 
 /**

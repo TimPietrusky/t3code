@@ -1,4 +1,4 @@
-import { EnvironmentThemeFile } from "@t3tools/contracts";
+import { EnvironmentThemeFile, MAX_THEME_CSS_LENGTH } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -93,6 +93,24 @@ it.layer(NodeServices.layer)("environment theme", (it) => {
         );
         assert.deepEqual(themes[0], { id: "nightfall", ...NIGHTFALL_THEME });
         assert.deepEqual(themes[1], { id: "shared-light", ...SHARED_THEME });
+      }),
+    ),
+  );
+
+  it.effect("publishes a theme's css and skips a file whose css is over the limit", () =>
+    withEnvironmentThemes(
+      {
+        "pink-love.json": encodeThemeFile({ ...SHARED_THEME, css: "body { color: hotpink; }" }),
+        "too-much.json": JSON.stringify({
+          ...SHARED_THEME,
+          css: "a".repeat(MAX_THEME_CSS_LENGTH + 1),
+        }),
+      },
+      Effect.gen(function* () {
+        const themes = yield* currentThemes;
+        assert.deepEqual(themes, [
+          { id: "pink-love", ...SHARED_THEME, css: "body { color: hotpink; }" },
+        ]);
       }),
     ),
   );

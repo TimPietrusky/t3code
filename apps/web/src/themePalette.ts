@@ -1,3 +1,4 @@
+import { MAX_THEME_CSS_LENGTH } from "@t3tools/contracts";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import "culori/css";
@@ -53,6 +54,7 @@ export type ThemeFile = Readonly<{
   variants?: ThemeVariantOverrides;
   collection?: ThemeCollection;
   managed?: boolean;
+  css?: string;
 }>;
 
 // Reserved ids come from shared so the CLI, the server watcher, and this
@@ -113,6 +115,31 @@ function isThemeId(value: unknown): value is string {
 
 function isThemeLabel(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.trim().length <= 48;
+}
+
+/**
+ * A theme's stylesheet, or undefined when it carries none. Whitespace-only
+ * CSS counts as none so clearing the editor field removes the key instead of
+ * saving an empty stylesheet.
+ */
+function parseThemeCss(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new Error("Theme CSS must be a string.");
+  if (value.length > MAX_THEME_CSS_LENGTH) {
+    throw new Error(
+      `Theme CSS is limited to ${Math.round(MAX_THEME_CSS_LENGTH / 1024)} KB (${value.length.toLocaleString()} characters given).`,
+    );
+  }
+  return value.trim().length > 0 ? value : undefined;
+}
+
+/** Stored themes keep loading when their CSS is unusable; only the CSS is dropped. */
+function lenientThemeCss(value: unknown): string | undefined {
+  try {
+    return parseThemeCss(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function parseThemeCollection(value: unknown): ThemeCollection | undefined {
@@ -177,6 +204,7 @@ function parseStoredTheme(value: unknown): ThemeDefinition | null {
   const variants = parseStoredThemeVariants(value.variants, value.appearance);
   if (value.variants !== undefined && variants === null) return null;
   const collection = parseThemeCollection(value.collection);
+  const css = lenientThemeCss(value.css);
 
   return {
     id: value.id,
@@ -186,6 +214,7 @@ function parseStoredTheme(value: unknown): ThemeDefinition | null {
     ...(variants ? { variants } : {}),
     ...(collection ? { collection } : {}),
     ...(value.managed === true ? { managed: true } : {}),
+    ...(css ? { css } : {}),
   };
 }
 
@@ -1395,6 +1424,7 @@ export function parseThemeFile(value: unknown): ThemeDefinition {
   }
 
   const overrides = parseThemeColorOverrides(rawColors);
+  const css = parseThemeCss(value.css);
   const collection = parseThemeCollection(value.collection);
   if (value.collection !== undefined && !collection) {
     throw new Error("Theme collections need a valid id and label.");
@@ -1427,6 +1457,7 @@ export function parseThemeFile(value: unknown): ThemeDefinition {
     ...(Object.keys(variants).length > 0 ? { variants } : {}),
     ...(collection ? { collection } : {}),
     ...(value.managed === true ? { managed: true } : {}),
+    ...(css ? { css } : {}),
   };
 }
 
@@ -1441,6 +1472,7 @@ export function serializeThemeFile(theme: ThemeDefinition): string {
     ...(canonicalTheme.variants ? { variants: canonicalTheme.variants } : {}),
     ...(canonicalTheme.collection ? { collection: canonicalTheme.collection } : {}),
     ...(canonicalTheme.managed ? { managed: true } : {}),
+    ...(canonicalTheme.css ? { css: canonicalTheme.css } : {}),
   };
   return `${JSON.stringify(file, null, 2)}\n`;
 }
@@ -1513,6 +1545,30 @@ export function getThemeColorVariable(role: ThemeColorRole): string {
   return APP_THEME_VARIABLES[role];
 }
 
+/** The one element carrying the active theme's stylesheet. */
+export const THEME_CSS_ELEMENT_ID = "t3-theme-css";
+
+/**
+ * Installs `css` as the document's theme stylesheet, or removes it when empty.
+ *
+ * The element is unlayered and lives in <body>, so it follows every
+ * stylesheet in <head> in tree order, including ones Vite and lazy chunks
+ * insert later. Unlayered rules beat Tailwind's layered utilities at any
+ * specificity, and that order settles ties with other unlayered rules.
+ */
+export function applyThemeCss(css: string | undefined): void {
+  if (typeof document === "undefined" || !document.body) return;
+  const existing = document.getElementById(THEME_CSS_ELEMENT_ID);
+  if (!css || css.trim().length === 0) {
+    existing?.remove();
+    return;
+  }
+  const element = existing ?? document.createElement("style");
+  element.id = THEME_CSS_ELEMENT_ID;
+  if (element.textContent !== css) element.textContent = css;
+  if (!element.isConnected) document.body.append(element);
+}
+
 /** Marks the document as wearing an unsaved draft rather than a stored theme. */
 export const THEME_PREVIEW_ID = "__preview";
 
@@ -1553,9 +1609,11 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
     for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
       root.style.setProperty(APP_THEME_VARIABLES[role], value);
     }
+    applyThemeCss(palette.css);
     return;
   }
 
+  applyThemeCss(undefined);
   delete root.dataset.themeId;
   for (const variable of Object.values(APP_THEME_VARIABLES)) {
     root.style.removeProperty(variable);

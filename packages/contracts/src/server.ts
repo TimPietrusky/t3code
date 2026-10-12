@@ -608,6 +608,16 @@ const EnvironmentThemeColors = Schema.Record(
   TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
 );
 
+/**
+ * Upper bound on a theme's custom CSS. A theme travels whole to every client
+ * and is repainted on each change, so a stylesheet is capped well above any
+ * hand-written theme but far below a pasted framework.
+ */
+export const MAX_THEME_CSS_LENGTH = 16 * 1024;
+
+/** Custom CSS a client appends after its own styles while the theme is active. */
+export const ThemeCss = Schema.String.check(Schema.isMaxLength(MAX_THEME_CSS_LENGTH));
+
 const environmentThemeFields = {
   /**
    * Standard exported theme files (the Download button's output) carry
@@ -632,6 +642,11 @@ const environmentThemeFields = {
       dark: Schema.optional(EnvironmentThemeColors),
     }),
   ),
+  /**
+   * Optional stylesheet applied while the theme renders either appearance.
+   * Older clients ignore the key, so a theme carrying it still recolors them.
+   */
+  css: Schema.optional(ThemeCss),
 };
 
 /** One published theme file. The id is the filename, not part of the content,
