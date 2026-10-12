@@ -42,6 +42,9 @@ On web and desktop, choose **Create theme** to adjust a palette, or import a T3 
 theme. The theme editor's color picker lets you select an area of the app to find the color to
 change. Export your theme as JSON to share it.
 
+A theme can also restyle the app with its own CSS: hide or rearrange small parts, change type and
+spacing, and more. See [Custom CSS in themes](./custom-css.md).
+
 ## Environment themes
 
 Environment themes and defaults come from the server serving your web app or the desktop app's
@@ -89,7 +92,7 @@ For an integration that generates a palette, this shorter format also works:
 
 Set `appearance` to `light` or `dark` and supply hex colors for `canvas` and `accent`. T3 Code
 generates the rest. The optional `colors` overrides use the names in the theme editor's advanced
-view.
+view. An optional `css` string adds [custom CSS](./custom-css.md).
 
 Write updates to a temporary file and rename it into place so clients never read a partial theme.
 Invalid files are not published.

@@ -21,6 +21,15 @@ Style with Tailwind classes in the component that renders the element.
   runtime are fine.
 - Theme-only rules use `@variant dark` and `@variant light`, not `.dark` selectors.
 
+## Theme CSS hooks
+
+Themes can carry CSS ([user guide](../user/custom-css.md)) that targets `data-t3-part`
+attributes. Those names are a public contract with users' themes: renaming or removing one, or
+moving it to an element with a different role, silently breaks themes nobody here can see. Keep
+the part on the element when restructuring, and add a part (and a line in the user guide) when a
+new region is one people will want to restyle. Parts must not change the default look; a slot that
+only exists for themes, such as `thread-project`, renders hidden.
+
 ## Composition
 
 The composer banners are the reference.
