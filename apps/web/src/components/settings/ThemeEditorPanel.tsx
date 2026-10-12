@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   applyThemeColorPreview,
+  applyThemeCss,
   THEME_COLOR_ROLES,
   THEME_FILE_VERSION,
   createVividThemeColors,
@@ -36,6 +37,7 @@ import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { getThemeRoleLabel, ThemeColorField } from "./ThemeColorPicker";
+import { ThemeCssEditor } from "./ThemeCssEditor";
 import {
   clearThemeInspectorHover,
   clearThemeInspectorHighlights,
@@ -316,6 +318,9 @@ export function ThemeEditorPanel({
   const [name, setName] = useState("");
   const [activeAppearance, setActiveAppearance] = useState<ThemeAppearance>(initialAppearance);
   const [isAdvanced, setIsAdvanced] = useState(false);
+  const [section, setSection] = useState<"colors" | "css">("colors");
+  // One stylesheet for the whole theme; rules can scope to :root.dark.
+  const [css, setCss] = useState("");
   const [colorsByAppearance, setColorsByAppearance] = useState<ThemeEditorColorsByAppearance>(() =>
     getThemeEditorColorsByAppearance(),
   );
@@ -408,6 +413,8 @@ export function ThemeEditorPanel({
       }
 
       setName(editingTheme?.label ?? seedName ?? "");
+      setCss(sourceTheme?.css ?? "");
+      setSection("colors");
       setActiveAppearance(nextAppearance);
       // Themes saved by the guided editor carry the managed flag; anything
       // else (imports, hand-edited files, older saves) opens in advanced mode
@@ -486,6 +493,14 @@ export function ThemeEditorPanel({
     if (!open || !isDraftSeeded) return;
     applyThemeColorPreview(colorsByAppearance[activeAppearance], activeAppearance);
   }, [activeAppearance, colorsByAppearance, isDraftSeeded, open]);
+
+  // The draft stylesheet previews on the live app like the palette does. A
+  // short delay keeps a fast typist from restyling the document per keystroke.
+  useEffect(() => {
+    if (!open || !isDraftSeeded) return;
+    const timer = window.setTimeout(() => applyThemeCss(css), 120);
+    return () => window.clearTimeout(timer);
+  }, [css, isDraftSeeded, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -799,6 +814,7 @@ export function ThemeEditorPanel({
               : colorsByAppearance.dark,
           }
         : colorsByAppearance;
+      const cssForSave = css.trim().length > 0 ? css : undefined;
 
       let savedTheme: ThemeDefinition;
       let mergedAppearance: ThemeAppearance | null = null;
@@ -827,6 +843,7 @@ export function ThemeEditorPanel({
               ...Object.fromEntries(editedModes.map((mode) => [mode, colorsForSave[mode]])),
             },
             ...(mergeTarget.managed === true && !isAdvanced ? { managed: true } : {}),
+            css: cssForSave ?? mergeTarget.css,
           }),
           ...(mergeTarget.collection ? { collection: mergeTarget.collection } : {}),
         });
@@ -858,6 +875,7 @@ export function ThemeEditorPanel({
               ? { variants: { [variantAppearance]: colorsForSave[variantAppearance] } }
               : {}),
             ...(isAdvanced ? {} : { managed: true }),
+            css: cssForSave,
           }),
           ...(editingTheme.collection ? { collection: editingTheme.collection } : {}),
         });
@@ -885,6 +903,7 @@ export function ThemeEditorPanel({
               [activeAppearance]: colorsForSave[activeAppearance],
             },
             ...(mergeTarget.managed === true && !isAdvanced ? { managed: true } : {}),
+            css: cssForSave ?? mergeTarget.css,
           }),
           ...(mergeTarget.collection ? { collection: mergeTarget.collection } : {}),
         });
@@ -896,6 +915,7 @@ export function ThemeEditorPanel({
             appearance: activeAppearance,
             colors: colorsForSave[activeAppearance],
             ...(isAdvanced ? {} : { managed: true }),
+            css: cssForSave,
           }),
         );
       }
@@ -994,6 +1014,21 @@ export function ThemeEditorPanel({
         {renderAppearanceButton("dark")}
       </ToggleGroup>
     </div>
+  );
+
+  const renderSectionTabs = () => (
+    <ToggleGroup
+      aria-label="Theme editor section"
+      variant="segmented"
+      value={[section]}
+      onValueChange={(next) => {
+        const value = next[0];
+        if (value === "colors" || value === "css") setSection(value);
+      }}
+    >
+      <Toggle value="colors">Colors</Toggle>
+      <Toggle value="css">CSS</Toggle>
+    </ToggleGroup>
   );
 
   const renderColorsHeader = () => (
@@ -1258,10 +1293,15 @@ export function ThemeEditorPanel({
               </p>
             ) : null}
             {renderAppearanceButtons()}
-            <div className="space-y-3">
-              {renderColorsHeader()}
-              {renderColorFields()}
-            </div>
+            {renderSectionTabs()}
+            {section === "css" ? (
+              <ThemeCssEditor onChange={setCss} value={css} />
+            ) : (
+              <div className="space-y-3">
+                {renderColorsHeader()}
+                {renderColorFields()}
+              </div>
+            )}
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-border/70 px-3 py-2">
             <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
