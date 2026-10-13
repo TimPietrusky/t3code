@@ -22,7 +22,9 @@ import {
   EnvironmentThemeId,
   environmentThemeFileHasColors,
 } from "@t3tools/contracts";
-import { UNPUBLISHABLE_THEME_IDS } from "@t3tools/shared/themePalettes";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
+import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
+import { BUILT_IN_THEME_IDS, UNPUBLISHABLE_THEME_IDS } from "@t3tools/shared/themePalettes";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -31,6 +33,7 @@ import * as Equal from "effect/Equal";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -39,11 +42,13 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
+import { readDefaultTheme, writeDefaultTheme } from "./environmentThemeDefault.ts";
 
 const decodeEnvironmentThemeFileJsonExit = Schema.decodeUnknownExit(
   Schema.fromJsonString(EnvironmentThemeFile),
 );
 const isEnvironmentThemeId = Schema.is(EnvironmentThemeId);
+const encodeThemeFileJson = Schema.encodeEffect(fromJsonStringPretty(EnvironmentThemeFile));
 
 const THEME_FILE_SUFFIX = ".json";
 
@@ -62,6 +67,42 @@ export const MAX_THEME_FILE_BYTES = 32 * 1024;
  * this far above any real directory while keeping a mistake off the wire.
  */
 const MAX_THEME_TOTAL_BYTES = 192 * 1024;
+
+/** A publish or set the caller can fix: the message says how. */
+export class EnvironmentThemeRejectedError extends Schema.TaggedError<EnvironmentThemeRejectedError>()(
+  "EnvironmentThemeRejectedError",
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason;
+  }
+}
+
+export class EnvironmentThemeStorageError extends Schema.TaggedError<EnvironmentThemeStorageError>()(
+  "EnvironmentThemeStorageError",
+  { operation: Schema.String, cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return `Could not ${this.operation}.`;
+  }
+}
+
+/** The environment's default theme, as `t3 theme set` records it. */
+export interface EnvironmentDefaultTheme {
+  readonly theme: string | null;
+  readonly setAt: string;
+}
+
+/** Why an id cannot be published, or null when it can. */
+export const unpublishableThemeIdReason = (themeId: string): string | null => {
+  if (UNPUBLISHABLE_THEME_IDS.has(themeId)) {
+    return `"${themeId}" is reserved: built-in themes and the appearance keywords cannot be replaced. Publish under another id.`;
+  }
+  if (!isEnvironmentThemeId(themeId)) {
+    return `"${themeId}" is not a valid theme id: use 1-48 lowercase letters, digits, and hyphens, starting with a letter or digit.`;
+  }
+  return null;
+};
 
 /** The published set with the sequence number it was observed at. */
 interface PublishedThemes {
@@ -85,6 +126,37 @@ export class EnvironmentThemeService extends Context.Service<
      * landing while a client connects is delivered rather than lost.
      */
     readonly streamChanges: Stream.Stream<ReadonlyArray<EnvironmentTheme>>;
+
+    /**
+     * Writes `<themesDir>/<themeId>.json` atomically and republishes at once,
+     * so connected clients retint without waiting for the watcher. Applies the
+     * watcher's own rules first, so it never reports success for a file the
+     * watcher would then skip.
+     */
+    readonly publish: (input: {
+      readonly themeId: string;
+      readonly file: EnvironmentThemeFile;
+    }) => Effect.Effect<
+      { readonly created: boolean; readonly theme: EnvironmentTheme },
+      EnvironmentThemeRejectedError | EnvironmentThemeStorageError
+    >;
+
+    /** Where published theme files live. */
+    readonly themesDirectory: string;
+
+    readonly readDefault: Effect.Effect<EnvironmentDefaultTheme, EnvironmentThemeStorageError>;
+
+    /**
+     * Sets (or, with null, clears) the environment's default theme exactly as
+     * `t3 theme set` does: each set switches connected clients once, including
+     * a re-set of the theme already set.
+     */
+    readonly setDefault: (
+      themeId: string | null,
+    ) => Effect.Effect<
+      EnvironmentDefaultTheme,
+      EnvironmentThemeRejectedError | EnvironmentThemeStorageError
+    >;
   }
 >()("t3/environmentTheme/EnvironmentThemeService") {}
 
@@ -218,7 +290,8 @@ export const readPublishedThemes = Effect.fn(function* (themesDir: string) {
  */
 
 const make = Effect.gen(function* () {
-  const { environmentThemesDir } = yield* ServerConfig.ServerConfig;
+  const { environmentThemesDir, settingsPath } = yield* ServerConfig.ServerConfig;
+  const path = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
   /**
    * Sliding with capacity 1: every update carries the complete set, so a
@@ -282,7 +355,89 @@ const make = Effect.gen(function* () {
     Effect.asVoid,
   );
 
+  const storageError = (operation: string) => (cause: unknown) =>
+    new EnvironmentThemeStorageError({ operation, cause });
+
+  const publish: EnvironmentThemeService["Service"]["publish"] = Effect.fn(
+    "EnvironmentTheme.publish",
+  )(function* ({ themeId, file }) {
+    const idReason = unpublishableThemeIdReason(themeId);
+    if (idReason !== null) return yield* new EnvironmentThemeRejectedError({ reason: idReason });
+    if (!environmentThemeFileHasColors(file)) {
+      return yield* new EnvironmentThemeRejectedError({
+        reason: "The theme has no colors: give canvas and accent, or a colors object.",
+      });
+    }
+    const contents = `${yield* encodeThemeFileJson(file).pipe(
+      Effect.mapError(
+        (cause) =>
+          new EnvironmentThemeRejectedError({ reason: `The theme is invalid: ${String(cause)}` }),
+      ),
+    )}\n`;
+    const bytes = Buffer.byteLength(contents);
+    if (bytes > MAX_THEME_FILE_BYTES) {
+      return yield* new EnvironmentThemeRejectedError({
+        reason: `The theme is ${bytes} bytes; a published theme is limited to ${MAX_THEME_FILE_BYTES}.`,
+      });
+    }
+    if (decodeEnvironmentThemeFileJsonExit(contents)._tag === "Failure") {
+      return yield* new EnvironmentThemeRejectedError({ reason: "The theme is invalid." });
+    }
+
+    const filePath = path.join(environmentThemesDir, `${themeId}${THEME_FILE_SUFFIX}`);
+    const existing = yield* fs.stat(filePath).pipe(Effect.option);
+    // The watcher refuses symlinks and anything else that is not a plain file,
+    // and writing through one would publish nothing.
+    if (existing._tag === "Some" && existing.value.type !== "File") {
+      return yield* new EnvironmentThemeRejectedError({
+        reason: `${filePath} exists and is not a regular file; remove it or use another id.`,
+      });
+    }
+    yield* writeFileStringAtomically({ filePath, contents }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.mapError(storageError(`write ${filePath}`)),
+    );
+    const state = yield* refresh;
+    const theme = state.themes.find((candidate) => candidate.id === themeId);
+    if (theme === undefined) {
+      return yield* new EnvironmentThemeRejectedError({
+        reason: `Wrote ${filePath}, but it is not published: the themes directory is over its file count or total size limit. Remove unused themes.`,
+      });
+    }
+    return { created: existing._tag === "None", theme };
+  });
+
+  const readDefault = readDefaultTheme(settingsPath).pipe(
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.mapError(storageError(`read ${settingsPath}`)),
+  );
+
+  const setDefault: EnvironmentThemeService["Service"]["setDefault"] = Effect.fn(
+    "EnvironmentTheme.setDefault",
+  )(function* (themeId) {
+    if (themeId !== null) {
+      const state = yield* refresh;
+      const known = [...BUILT_IN_THEME_IDS, ...state.themes.map((theme) => theme.id)];
+      if (!known.includes(themeId)) {
+        return yield* new EnvironmentThemeRejectedError({
+          reason: `No theme named "${themeId}". Available: ${known.toSorted().join(", ")}. Publish it first.`,
+        });
+      }
+    }
+    yield* writeDefaultTheme({ settingsPath, themeId: themeId ?? "" }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.mapError(storageError(`write ${settingsPath}`)),
+    );
+    return yield* readDefault;
+  });
+
   return {
+    themesDirectory: environmentThemesDir,
+    publish,
+    readDefault,
+    setDefault,
     current: Effect.map(refresh, (state) => state.themes),
     get streamChanges() {
       return Stream.unwrap(
