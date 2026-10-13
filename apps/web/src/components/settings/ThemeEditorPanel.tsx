@@ -37,6 +37,7 @@ import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { getThemeRoleLabel, ThemeColorField } from "./ThemeColorPicker";
+import { ThemeAssetsEditor } from "./ThemeAssetsEditor";
 import { ThemeCssEditor } from "./ThemeCssEditor";
 import {
   clearThemeInspectorHover,
@@ -321,6 +322,8 @@ export function ThemeEditorPanel({
   const [section, setSection] = useState<"colors" | "css">("colors");
   // One stylesheet for the whole theme; rules can scope to :root.dark.
   const [css, setCss] = useState("");
+  // Images the stylesheet reaches through var(--t3-asset-<name>).
+  const [assets, setAssets] = useState<Readonly<Record<string, string>>>({});
   const [colorsByAppearance, setColorsByAppearance] = useState<ThemeEditorColorsByAppearance>(() =>
     getThemeEditorColorsByAppearance(),
   );
@@ -414,6 +417,7 @@ export function ThemeEditorPanel({
 
       setName(editingTheme?.label ?? seedName ?? "");
       setCss(sourceTheme?.css ?? "");
+      setAssets(sourceTheme?.assets ?? {});
       setSection("colors");
       setActiveAppearance(nextAppearance);
       // Themes saved by the guided editor carry the managed flag; anything
@@ -498,9 +502,9 @@ export function ThemeEditorPanel({
   // short delay keeps a fast typist from restyling the document per keystroke.
   useEffect(() => {
     if (!open || !isDraftSeeded) return;
-    const timer = window.setTimeout(() => applyThemeCss(css), 120);
+    const timer = window.setTimeout(() => applyThemeCss(css, assets), 120);
     return () => window.clearTimeout(timer);
-  }, [css, isDraftSeeded, open]);
+  }, [assets, css, isDraftSeeded, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -815,6 +819,7 @@ export function ThemeEditorPanel({
           }
         : colorsByAppearance;
       const cssForSave = css.trim().length > 0 ? css : undefined;
+      const assetsForSave = Object.keys(assets).length > 0 ? assets : undefined;
 
       let savedTheme: ThemeDefinition;
       let mergedAppearance: ThemeAppearance | null = null;
@@ -844,6 +849,7 @@ export function ThemeEditorPanel({
             },
             ...(mergeTarget.managed === true && !isAdvanced ? { managed: true } : {}),
             css: cssForSave ?? mergeTarget.css,
+            assets: assetsForSave ?? mergeTarget.assets,
           }),
           ...(mergeTarget.collection ? { collection: mergeTarget.collection } : {}),
         });
@@ -876,6 +882,7 @@ export function ThemeEditorPanel({
               : {}),
             ...(isAdvanced ? {} : { managed: true }),
             css: cssForSave,
+            assets: assetsForSave,
           }),
           ...(editingTheme.collection ? { collection: editingTheme.collection } : {}),
         });
@@ -904,6 +911,7 @@ export function ThemeEditorPanel({
             },
             ...(mergeTarget.managed === true && !isAdvanced ? { managed: true } : {}),
             css: cssForSave ?? mergeTarget.css,
+            assets: assetsForSave ?? mergeTarget.assets,
           }),
           ...(mergeTarget.collection ? { collection: mergeTarget.collection } : {}),
         });
@@ -916,6 +924,7 @@ export function ThemeEditorPanel({
             colors: colorsForSave[activeAppearance],
             ...(isAdvanced ? {} : { managed: true }),
             css: cssForSave,
+            assets: assetsForSave,
           }),
         );
       }
@@ -1295,7 +1304,10 @@ export function ThemeEditorPanel({
             {renderAppearanceButtons()}
             {renderSectionTabs()}
             {section === "css" ? (
-              <ThemeCssEditor onChange={setCss} value={css} />
+              <div className="space-y-4">
+                <ThemeCssEditor onChange={setCss} value={css} />
+                <ThemeAssetsEditor assets={assets} onChange={setAssets} />
+              </div>
             ) : (
               <div className="space-y-3">
                 {renderColorsHeader()}
