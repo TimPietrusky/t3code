@@ -31,6 +31,8 @@ appearance with `:root.dark` or `:root:not(.dark)`. Use the palette's color vari
 
 ## What to change
 
+<!-- generated:theme-css-rules -->
+
 Target the `data-t3-part` attributes listed below. They are kept stable across releases; class
 names and the rest of the markup are not, so selectors built on them break without notice.
 
@@ -44,7 +46,11 @@ controls or break resizing. Avoid animations that run continuously; they keep th
 Your rules already beat the built-in utility classes. You only need `!important` for the rare
 built-in rule that is itself marked important.
 
+<!-- /generated:theme-css-rules -->
+
 ## Parts
+
+<!-- generated:theme-css-parts -->
 
 In the default sidebar, `thread-item` and `thread-row` also carry `data-t3-variant`: `card` for
 active threads and `slim` for settled ones. The open thread's row has `aria-current="page"`.
@@ -316,3 +322,5 @@ inside `thread-row`, so it can be shown inline or placed on the row.
   font-size: 15px;
 }
 ```
+
+<!-- /generated:theme-css-parts -->

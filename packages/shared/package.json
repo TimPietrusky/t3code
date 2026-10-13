@@ -31,6 +31,10 @@
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"
     },
+    "./themeCssReference": {
+      "types": "./src/themeCssReference.ts",
+      "import": "./src/themeCssReference.ts"
+    },
     "./themePreview": {
       "types": "./src/themePreview.ts",
       "import": "./src/themePreview.ts"
