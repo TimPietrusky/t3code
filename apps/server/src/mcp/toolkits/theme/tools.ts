@@ -62,6 +62,9 @@ const ThemeListTool = Tool.make("t3_theme_list", {
         appearance: Appearance,
         appearances: Schema.Array(Appearance),
         hasCss: Schema.Boolean,
+        assets: Schema.Array(Schema.String).annotate({
+          description: "Names of the theme's images, each var(--t3-asset-<name>) in its css.",
+        }),
       }),
     ),
     reservedIds: Schema.Array(Schema.String),
@@ -75,13 +78,16 @@ const ThemeListTool = Tool.make("t3_theme_list", {
 const ThemeReadTool = Tool.make("t3_theme_read", {
   ...shared,
   description:
-    "Read one theme as a theme file, including its custom CSS: a published theme as written, or a built-in's palette to start a new theme from.",
+    "Read one theme as a theme file, including its custom CSS: a published theme as written, or a built-in's palette to start a new theme from. Image data is not returned, only each image's name and size; t3_theme_write keeps a theme's images unless you replace them.",
   parameters: Schema.Struct({ themeId: ThemeId }),
   success: Schema.Struct({
     themeId: Schema.String,
     source: Schema.Literals(["built-in", "published"]),
     isDefault: Schema.Boolean,
     theme: EnvironmentThemeFile,
+    assets: Schema.Array(
+      Schema.Struct({ name: Schema.String, variable: Schema.String, bytes: Schema.Number }),
+    ).annotate({ description: "The theme's images, left out of theme.assets." }),
   }),
 })
   .annotate(Tool.Readonly, true)
@@ -91,8 +97,17 @@ const ThemeReadTool = Tool.make("t3_theme_read", {
 const ThemeWriteTool = Tool.make("t3_theme_write", {
   ...shared,
   description:
-    "Create or replace a theme this environment publishes to its web and desktop clients. Read t3_theme_guide first for the format. Either give appearance, canvas and accent hex colors (the rest of the palette is generated; colors overrides roles) or a full colors palette, plus optional variants for the other appearance and optional css. Replacing the theme clients are showing retints them live; to switch clients to a new theme, call t3_theme_set. Requires a live full-access/default calling thread.",
-  parameters: Schema.Struct({ themeId: ThemeId, theme: EnvironmentThemeFile }),
+    "Create or replace a theme this environment publishes to its web and desktop clients. Read t3_theme_guide first for the format. Either give appearance, canvas and accent hex colors (the rest of the palette is generated; colors overrides roles) or a full colors palette, plus optional variants for the other appearance and optional css. Put photos in with assetFiles (absolute paths to image files on this machine); the theme's existing images are kept unless theme.assets is given. Replacing the theme clients are showing retints them live; to switch clients to a new theme, call t3_theme_set. Requires a live full-access/default calling thread.",
+  parameters: Schema.Struct({
+    themeId: ThemeId,
+    theme: EnvironmentThemeFile,
+    assetFiles: Schema.optional(
+      Schema.Record(Schema.String, Schema.String).annotate({
+        description:
+          'Images to embed, asset name to absolute file path on this machine, e.g. { "bg": "/tmp/meadow.webp" }. Each becomes var(--t3-asset-<name>) in css. PNG, JPEG, WebP, AVIF, GIF or SVG; about 750 KB of files in total, so resize photos to about 2400px wide first.',
+      }),
+    ),
+  }),
   success: Schema.Struct({
     themeId: Schema.String,
     created: Schema.Boolean,

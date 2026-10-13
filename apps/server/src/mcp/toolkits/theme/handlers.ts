@@ -1,4 +1,9 @@
-import { type EnvironmentThemeFile, OrchestratorMcpFailure } from "@t3tools/contracts";
+import {
+  type EnvironmentThemeFile,
+  OrchestratorMcpFailure,
+  themeAssetsProblem,
+  themeAssetVariable,
+} from "@t3tools/contracts";
 import {
   BUILT_IN_THEMES,
   getThemeColorsForAppearance,
@@ -89,6 +94,7 @@ export const layer = McpToolAccess.toLayer(ThemeToolkit, {
           appearance: theme.appearance,
           appearances: publishedAppearances(theme),
           hasCss: (theme.css ?? "").trim().length > 0,
+          assets: Object.keys(theme.assets ?? {}),
         })),
         reservedIds: [...UNPUBLISHABLE_THEME_IDS].toSorted(),
         themesDirectory: themes.themesDirectory,
@@ -102,8 +108,20 @@ export const layer = McpToolAccess.toLayer(ThemeToolkit, {
       const isDefault = current.theme === themeId;
       const publishedTheme = (yield* themes.current).find((theme) => theme.id === themeId);
       if (publishedTheme !== undefined) {
-        const { id: _id, ...theme } = publishedTheme;
-        return { themeId, source: "published" as const, isDefault, theme };
+        // Images stay out of the result: a photo is hundreds of KB of base64
+        // that would flood the caller's context and could not be edited anyway.
+        const { id: _id, assets, ...theme } = publishedTheme;
+        return {
+          themeId,
+          source: "published" as const,
+          isDefault,
+          theme,
+          assets: Object.entries(assets ?? {}).map(([name, uri]) => ({
+            name,
+            variable: `var(${themeAssetVariable(name)})`,
+            bytes: Buffer.byteLength(uri.slice(uri.indexOf(",") + 1), "base64"),
+          })),
+        };
       }
       const builtIn = BUILT_IN_THEMES.find((theme) => theme.id === themeId);
       if (builtIn === undefined) {
@@ -125,18 +143,41 @@ export const layer = McpToolAccess.toLayer(ThemeToolkit, {
           colors: builtIn.colors,
           ...(variant ? { variants: { [otherAppearance]: variant } } : {}),
         },
+        assets: [],
       };
     }),
   ),
-  t3_theme_write: McpToolAccess.writesEnvironment(({ themeId, theme }, check) =>
+  t3_theme_write: McpToolAccess.writesEnvironment(({ themeId, theme, assetFiles }, check) =>
     withCallerLock(
       Effect.gen(function* () {
         // The turn may have ended, or the thread's modes changed, while this waited for the lock.
         yield* check;
         const themes = yield* access;
-        const { created } = yield* themes
-          .publish({ themeId, file: theme })
-          .pipe(Effect.mapError(failure));
+        // t3_theme_read leaves images out, so a read-edit-write round trip
+        // keeps them unless the caller gives theme.assets explicitly.
+        const previous = (yield* themes.current).find((candidate) => candidate.id === themeId);
+        const assets: Record<string, string> = { ...(theme.assets ?? previous?.assets) };
+        for (const [name, filePath] of Object.entries(assetFiles ?? {})) {
+          const read = EnvironmentTheme.readThemeAssetFile(filePath);
+          if ("problem" in read) {
+            return yield* new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message: `Image "${name}": ${read.problem}`,
+            });
+          }
+          assets[name] = read.dataUri;
+        }
+        const assetsProblem = themeAssetsProblem(assets);
+        if (assetsProblem !== null) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: assetsProblem,
+          });
+        }
+        const { assets: _assets, ...rest } = theme;
+        const file: EnvironmentThemeFile =
+          Object.keys(assets).length > 0 ? { ...rest, assets } : rest;
+        const { created } = yield* themes.publish({ themeId, file }).pipe(Effect.mapError(failure));
         const current = yield* themes.readDefault.pipe(Effect.mapError(failure));
         const isDefault = current.theme === themeId;
         return {

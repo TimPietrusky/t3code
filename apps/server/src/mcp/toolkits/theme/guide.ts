@@ -1,4 +1,8 @@
-import { MAX_THEME_CSS_LENGTH } from "@t3tools/contracts";
+import {
+  MAX_THEME_ASSET_COUNT,
+  MAX_THEME_ASSETS_LENGTH,
+  MAX_THEME_CSS_LENGTH,
+} from "@t3tools/contracts";
 import {
   renderThemeCssPartsMarkdown,
   THEME_CSS_RULES_MARKDOWN,
@@ -35,6 +39,29 @@ export const themeGuideMarkdown = (): string =>
       "- `colors` overrides individual roles (any CSS color); without seeds it is the whole palette.",
       '- `variants` adds the other appearance as a colors object, e.g. `{ "dark": { "canvas": "#0f1a14", "accent": "#5fd3a1", ... } }`. Variants are not generated from seeds, so give a full dark palette (at least canvas, text, surface, sidebar, accent and border roles) or the rest falls back to the stock dark colors.',
       `- \`css\` is optional, up to ${MAX_THEME_CSS_LENGTH.toLocaleString("en-US")} characters, applied in both appearances; scope dark-only rules with \`:root.dark\`. The whole file is limited to ${MAX_THEME_FILE_BYTES.toLocaleString("en-US")} bytes.`,
+      "- `assets` is optional: images, name to base64 data URI (see Images).",
+    ].join("\n"),
+    "## Images",
+    [
+      "A theme can carry real photos and artwork. Images live inside the theme, so they work offline, in the desktop app (which blocks remote stylesheets and fonts) and on every client the theme reaches.",
+      "",
+      `1. Get the image onto this machine and make it background-sized: about 2400px wide as WebP or JPEG, a few hundred KB (\`sips\`, \`cwebp\` or \`ffmpeg\` work). Use images you may use: your own, public domain (NASA) or CC0.`,
+      '2. Pass it to `t3_theme_write` as `assetFiles: { "photo": "/absolute/path/photo.webp" }`. The server reads and embeds it; do not paste base64 yourself.',
+      "3. Each image becomes a CSS variable holding a `url()`: `photo` is `var(--t3-asset-photo)`.",
+      "",
+      "```css",
+      '[data-t3-part="app-shell"] {',
+      "  background: var(--t3-asset-photo) center / cover no-repeat fixed;",
+      "}",
+      '[data-t3-part="sidebar"], [data-t3-part="main"] {',
+      "  background: color-mix(in oklab, var(--app-theme-canvas) 72%, transparent);",
+      "  backdrop-filter: blur(18px) saturate(1.2);",
+      "}",
+      "```",
+      "",
+      `- Up to ${MAX_THEME_ASSET_COUNT} images and ${Math.round(MAX_THEME_ASSETS_LENGTH / 1024).toLocaleString("en-US")} KB of data URIs per theme (about ${Math.round((MAX_THEME_ASSETS_LENGTH * 3) / 4 / 1024).toLocaleString("en-US")} KB of image files). Names are lowercase letters, digits and hyphens, starting with a letter.`,
+      "- `t3_theme_read` lists a theme's images by name and size but leaves out their data. `t3_theme_write` keeps the existing images unless you give `theme.assets` (`{}` removes them all); `assetFiles` adds or replaces single images on top.",
+      "- Keep text readable over a photo: lay translucent panels with `backdrop-filter: blur()` over it, or darken it with a gradient in the same `background` (e.g. `linear-gradient(rgb(0 0 0 / 0.4), rgb(0 0 0 / 0.4)), var(--t3-asset-photo)`).",
     ].join("\n"),
     "## Color roles",
     [

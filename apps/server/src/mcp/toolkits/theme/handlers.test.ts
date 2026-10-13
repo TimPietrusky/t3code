@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   EnvironmentId,
+  MAX_THEME_ASSETS_LENGTH,
   MAX_THEME_CSS_LENGTH,
   ProviderInstanceId,
   ThreadId,
@@ -100,6 +101,13 @@ const call = (name: keyof typeof ThemeToolkit.tools, params: unknown) =>
     };
   });
 
+const PNG_PREFIX = "data:image/png;base64,";
+/** A 1x1 PNG, enough for the sniffer and the data URI pattern. */
+const PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+  "base64",
+);
+
 const readSettings = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const { settingsPath } = yield* ServerConfig.ServerConfig;
@@ -131,7 +139,14 @@ it.layer(NodeServices.layer)("theme tools", (it) => {
 
         const list = yield* call("t3_theme_list", {});
         assert.deepEqual(list.published, [
-          { id: "mint", name: "Mint", appearance: "light", appearances: ["light"], hasCss: true },
+          {
+            id: "mint",
+            name: "Mint",
+            appearance: "light",
+            appearances: ["light"],
+            hasCss: true,
+            assets: [],
+          },
         ]);
         assert.include(list.reservedIds as ReadonlyArray<string>, "ocean");
 
@@ -141,6 +156,7 @@ it.layer(NodeServices.layer)("theme tools", (it) => {
           source: "published",
           isDefault: false,
           theme: MINT,
+          assets: [],
         });
 
         const replaced = yield* call("t3_theme_write", {
@@ -165,16 +181,79 @@ it.layer(NodeServices.layer)("theme tools", (it) => {
         assert.include(malformed.message, "not a valid theme id");
 
         const colors = Object.fromEntries(
-          Array.from({ length: 600 }, (_, index) => [`role${index}`, `oklch(0.5 0.1 ${index})`]),
+          Array.from({ length: 4000 }, (_, index) => [`role${index}`, `oklch(0.5 0.1 ${index})`]),
         );
+        const photo = `${PNG_PREFIX}${"A".repeat(MAX_THEME_ASSETS_LENGTH - PNG_PREFIX.length)}`;
         const oversized = yield* call("t3_theme_write", {
           themeId: "huge",
-          theme: { ...MINT, colors, css: "a".repeat(MAX_THEME_CSS_LENGTH) },
+          theme: {
+            ...MINT,
+            colors,
+            css: "a".repeat(MAX_THEME_CSS_LENGTH),
+            assets: { photo },
+          },
         });
         assert.strictEqual(oversized.code, "invalid_request");
         assert.include(oversized.message, "limited to");
       }),
     ),
+  );
+
+  it.effect(
+    "embeds images from files, keeps them across rewrites, and reads them as a summary",
+    () =>
+      withThemeTools(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-theme-assets-" });
+          const photoPath = `${dir}/photo.png`;
+          yield* fs.writeFile(photoPath, PNG_BYTES);
+          const notesPath = `${dir}/notes.txt`;
+          yield* fs.writeFileString(notesPath, "not an image");
+
+          const written = yield* call("t3_theme_write", {
+            themeId: "mint",
+            theme: MINT,
+            assetFiles: { photo: photoPath },
+          });
+          assert.strictEqual(written.created, true);
+          const service = yield* EnvironmentTheme.EnvironmentThemeService;
+          const embedded = `${PNG_PREFIX}${PNG_BYTES.toString("base64")}`;
+          assert.deepEqual((yield* service.current)[0]?.assets, { photo: embedded });
+
+          // Read leaves the data out, and writing what it returned keeps the image.
+          const read = yield* call("t3_theme_read", { themeId: "mint" });
+          assert.deepEqual(read.theme, MINT);
+          assert.deepEqual(read.assets, [
+            { name: "photo", variable: "var(--t3-asset-photo)", bytes: PNG_BYTES.length },
+          ]);
+          yield* call("t3_theme_write", { themeId: "mint", theme: { ...MINT, css: "" } });
+          assert.deepEqual((yield* service.current)[0]?.assets, { photo: embedded });
+          const list = yield* call("t3_theme_list", {});
+          assert.deepEqual((list.published as ReadonlyArray<{ assets: unknown }>)[0]?.assets, [
+            "photo",
+          ]);
+
+          // An explicit empty map removes them.
+          yield* call("t3_theme_write", { themeId: "mint", theme: { ...MINT, assets: {} } });
+          assert.isUndefined((yield* service.current)[0]?.assets);
+
+          for (const [assetFiles, reason] of [
+            [{ photo: notesPath }, "is not a PNG"],
+            [{ photo: "photo.png" }, "not an absolute path"],
+            [{ photo: `${dir}/missing.png` }, "does not exist"],
+            [{ "Bad Name": photoPath }, "not a valid image name"],
+          ] as const) {
+            const rejected = yield* call("t3_theme_write", {
+              themeId: "mint",
+              theme: MINT,
+              assetFiles,
+            });
+            assert.strictEqual(rejected.code, "invalid_request");
+            assert.include(rejected.message, reason);
+          }
+        }),
+      ),
   );
 
   it.effect("reads a built-in as a theme file to start from", () =>
