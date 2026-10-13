@@ -30,6 +30,35 @@ Theme CSS is limited to 16 KB. The same CSS applies in light and dark mode; scop
 appearance with `:root.dark` or `:root:not(.dark)`. Use the palette's color variables, such as
 `var(--app-theme-accent)`, so the CSS follows the light and dark palettes.
 
+## Images
+
+A theme can carry photos and artwork. They are stored inside the theme, so they work offline, in
+the desktop app, and on every computer the theme reaches. Each image is a CSS variable holding a
+`url()`: an image named `meadow` is `var(--t3-asset-meadow)`.
+
+```css
+[data-t3-part="app-shell"] {
+  background: var(--t3-asset-meadow) center / cover no-repeat;
+}
+[data-t3-part="sidebar"] {
+  background: color-mix(in oklab, var(--app-theme-sidebar) 70%, transparent);
+  backdrop-filter: blur(18px);
+}
+```
+
+- **Theme editor:** on the **CSS** tab, click **Add image** below the stylesheet. Photos are
+  resized and saved as WebP so they fit.
+- **Theme file:** add an `assets` object that maps names to base64 data URIs:
+  `"assets": { "meadow": "data:image/webp;base64,UklGR..." }`. PNG, JPEG, WebP, AVIF, GIF and SVG
+  work.
+- **Ask your agent:** it can embed an image file from your computer when it writes the theme.
+
+A theme holds up to 8 images and 1 MB of data URIs, about 750 KB of image files. A photo about
+2400 pixels wide as WebP or JPEG is plenty for a full-window background. Keep text readable with
+translucent, blurred panels over the photo, or darken it with a gradient in the same `background`.
+Themes you save in the app keep their images in browser storage, which has room for a few image
+themes, so remove images you no longer use.
+
 ## What to change
 
 <!-- generated:theme-css-rules -->
@@ -48,7 +77,8 @@ Your rules already beat the built-in utility classes. You only need `!important`
 built-in rule that is itself marked important.
 
 Keep everything in the theme: the desktop app does not load stylesheets or fonts from other
-sites, so `@import` and web fonts by URL are ignored there. Use fonts installed on the computer.
+sites, so `@import` and web fonts by URL are ignored there. Use fonts installed on the computer,
+and put images in the theme itself as assets, used through `var(--t3-asset-<name>)`.
 
 <!-- /generated:theme-css-rules -->
 
