@@ -1,4 +1,4 @@
-import { MAX_THEME_CSS_LENGTH } from "@t3tools/contracts";
+import { MAX_THEME_CSS_LENGTH, themeAssetsProblem, themeAssetVariable } from "@t3tools/contracts";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import "culori/css";
@@ -55,6 +55,7 @@ export type ThemeFile = Readonly<{
   collection?: ThemeCollection;
   managed?: boolean;
   css?: string;
+  assets?: Readonly<Record<string, string>>;
 }>;
 
 // Reserved ids come from shared so the CLI, the server watcher, and this
@@ -142,6 +143,27 @@ function lenientThemeCss(value: unknown): string | undefined {
   }
 }
 
+/**
+ * A theme's images, or undefined when it carries none. An empty map counts as
+ * none so removing the last image drops the key.
+ */
+function parseThemeAssets(value: unknown): Readonly<Record<string, string>> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) throw new Error("Theme assets must be an object of image data URIs.");
+  const problem = themeAssetsProblem(value);
+  if (problem !== null) throw new Error(problem);
+  return Object.keys(value).length > 0 ? (value as Record<string, string>) : undefined;
+}
+
+/** Stored themes keep loading when their images are unusable; only the images are dropped. */
+function lenientThemeAssets(value: unknown): Readonly<Record<string, string>> | undefined {
+  try {
+    return parseThemeAssets(value);
+  } catch {
+    return undefined;
+  }
+}
+
 function parseThemeCollection(value: unknown): ThemeCollection | undefined {
   return isRecord(value) &&
     typeof value.id === "string" &&
@@ -205,6 +227,7 @@ function parseStoredTheme(value: unknown): ThemeDefinition | null {
   if (value.variants !== undefined && variants === null) return null;
   const collection = parseThemeCollection(value.collection);
   const css = lenientThemeCss(value.css);
+  const assets = lenientThemeAssets(value.assets);
 
   return {
     id: value.id,
@@ -215,6 +238,7 @@ function parseStoredTheme(value: unknown): ThemeDefinition | null {
     ...(collection ? { collection } : {}),
     ...(value.managed === true ? { managed: true } : {}),
     ...(css ? { css } : {}),
+    ...(assets ? { assets } : {}),
   };
 }
 
@@ -1425,6 +1449,7 @@ export function parseThemeFile(value: unknown): ThemeDefinition {
 
   const overrides = parseThemeColorOverrides(rawColors);
   const css = parseThemeCss(value.css);
+  const assets = parseThemeAssets(value.assets);
   const collection = parseThemeCollection(value.collection);
   if (value.collection !== undefined && !collection) {
     throw new Error("Theme collections need a valid id and label.");
@@ -1458,6 +1483,7 @@ export function parseThemeFile(value: unknown): ThemeDefinition {
     ...(collection ? { collection } : {}),
     ...(value.managed === true ? { managed: true } : {}),
     ...(css ? { css } : {}),
+    ...(assets ? { assets } : {}),
   };
 }
 
@@ -1473,6 +1499,7 @@ export function serializeThemeFile(theme: ThemeDefinition): string {
     ...(canonicalTheme.collection ? { collection: canonicalTheme.collection } : {}),
     ...(canonicalTheme.managed ? { managed: true } : {}),
     ...(canonicalTheme.css ? { css: canonicalTheme.css } : {}),
+    ...(canonicalTheme.assets ? { assets: canonicalTheme.assets } : {}),
   };
   return `${JSON.stringify(file, null, 2)}\n`;
 }
@@ -1549,23 +1576,43 @@ export function getThemeColorVariable(role: ThemeColorRole): string {
 export const THEME_CSS_ELEMENT_ID = "t3-theme-css";
 
 /**
- * Installs `css` as the document's theme stylesheet, or removes it when empty.
+ * The rule exposing a theme's images to its CSS: each asset becomes
+ * `--t3-asset-<name>: url("data:...")` on the root, so `background-image:
+ * var(--t3-asset-meadow)` works anywhere. Names and values are validated on
+ * the way in; anything that slipped past is skipped rather than written into
+ * the stylesheet.
+ */
+export function themeAssetsCss(assets: Readonly<Record<string, string>> | undefined): string {
+  if (!assets) return "";
+  const declarations = Object.entries(assets)
+    .filter(([name, uri]) => themeAssetsProblem({ [name]: uri }) === null)
+    .map(([name, uri]) => `  ${themeAssetVariable(name)}: url("${uri}");`);
+  return declarations.length > 0 ? `:root {\n${declarations.join("\n")}\n}\n` : "";
+}
+
+/**
+ * Installs `css` (after the rule exposing `assets`) as the document's theme
+ * stylesheet, or removes it when both are empty.
  *
  * The element is unlayered and lives in <body>, so it follows every
  * stylesheet in <head> in tree order, including ones Vite and lazy chunks
  * insert later. Unlayered rules beat Tailwind's layered utilities at any
  * specificity, and that order settles ties with other unlayered rules.
  */
-export function applyThemeCss(css: string | undefined): void {
+export function applyThemeCss(
+  css: string | undefined,
+  assets?: Readonly<Record<string, string>>,
+): void {
   if (typeof document === "undefined" || !document.body) return;
   const existing = document.getElementById(THEME_CSS_ELEMENT_ID);
-  if (!css || css.trim().length === 0) {
+  const text = `${themeAssetsCss(assets)}${css ?? ""}`;
+  if (text.trim().length === 0) {
     existing?.remove();
     return;
   }
   const element = existing ?? document.createElement("style");
   element.id = THEME_CSS_ELEMENT_ID;
-  if (element.textContent !== css) element.textContent = css;
+  if (element.textContent !== text) element.textContent = text;
   if (!element.isConnected) document.body.append(element);
 }
 
@@ -1609,7 +1656,7 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
     for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
       root.style.setProperty(APP_THEME_VARIABLES[role], value);
     }
-    applyThemeCss(palette.css);
+    applyThemeCss(palette.css, palette.assets);
     return;
   }
 

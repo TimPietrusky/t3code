@@ -128,6 +128,11 @@ export type ThemeDefinition = Readonly<{
    * while this theme renders either appearance. Mobile ignores it.
    */
   css?: string;
+  /**
+   * Images the stylesheet uses, name to base64 data URI, each exposed as
+   * `var(--t3-asset-<name>)`.
+   */
+  assets?: Readonly<Record<string, string>>;
 }>;
 
 /**

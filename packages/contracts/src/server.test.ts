@@ -3,6 +3,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import {
+  EnvironmentThemeFile,
+  MAX_THEME_ASSET_COUNT,
+  MAX_THEME_ASSETS_LENGTH,
   OtlpEndpointCheckInput,
   resolveEnvironmentMachineKind,
   ServerConfig,
@@ -277,6 +280,31 @@ describe("OtlpEndpointCheckInput", () => {
     );
     for (const url of ["data:text/plain,ok", "file:///etc/hosts", "collector:4318/v1/traces"]) {
       expect(() => decode({ signal: "traces", url })).toThrow();
+    }
+  });
+});
+
+describe("EnvironmentThemeFile assets", () => {
+  const decode = Schema.decodeUnknownExit(EnvironmentThemeFile);
+  const base = { name: "Meadow", appearance: "light", canvas: "#f4fbef", accent: "#3f9d4a" };
+  const photo = "data:image/webp;base64,UklGRg==";
+
+  it("accepts base64 image data URIs under valid names", () => {
+    expect(decode({ ...base, assets: { meadow: photo, "leaf-2": photo } })._tag).toBe("Success");
+  });
+
+  it("rejects remote URLs, url() breakouts, bad names, too many and too large", () => {
+    for (const assets of [
+      { meadow: "https://example.com/meadow.webp" },
+      { meadow: 'data:image/png;base64,AA");}body{background:url("' },
+      { meadow: "data:text/html;base64,PGh0bWw+" },
+      { Meadow: photo },
+      Object.fromEntries(
+        Array.from({ length: MAX_THEME_ASSET_COUNT + 1 }, (_, index) => [`a${index}`, photo]),
+      ),
+      { meadow: `data:image/png;base64,${"A".repeat(MAX_THEME_ASSETS_LENGTH)}` },
+    ]) {
+      expect(decode({ ...base, assets })._tag).toBe("Failure");
     }
   });
 });

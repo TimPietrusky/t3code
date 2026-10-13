@@ -115,6 +115,49 @@ it.layer(NodeServices.layer)("environment theme", (it) => {
     ),
   );
 
+  it.effect("publishes a theme's images and skips a file whose images are unusable", () => {
+    const photo = "data:image/webp;base64,UklGRg==";
+    return withEnvironmentThemes(
+      {
+        "meadow.json": encodeThemeFile({ ...SHARED_THEME, assets: { photo } }),
+        "remote.json": JSON.stringify({
+          ...SHARED_THEME,
+          assets: { photo: "https://example.com/photo.webp" },
+        }),
+        "breakout.json": JSON.stringify({
+          ...SHARED_THEME,
+          assets: { photo: 'data:image/png;base64,AA");}body{x:url("' },
+        }),
+      },
+      Effect.gen(function* () {
+        assert.deepEqual(yield* currentThemes, [
+          { id: "meadow", ...SHARED_THEME, assets: { photo } },
+        ]);
+      }),
+    );
+  });
+
+  it("recognizes theme images by their bytes, not their names", () => {
+    const sniff = (value: string | Buffer) =>
+      EnvironmentTheme.sniffThemeAssetMimeType(
+        typeof value === "string" ? Buffer.from(value, "latin1") : value,
+      );
+    assert.strictEqual(
+      sniff(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+      "image/png",
+    );
+    assert.strictEqual(sniff(Buffer.from([0xff, 0xd8, 0xff, 0xe0])), "image/jpeg");
+    assert.strictEqual(sniff("RIFF\0\0\0\0WEBPVP8 "), "image/webp");
+    assert.strictEqual(sniff("\0\0\0\x1cftypavif"), "image/avif");
+    assert.strictEqual(sniff("GIF89a"), "image/gif");
+    assert.strictEqual(
+      sniff('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"/>'),
+      "image/svg+xml",
+    );
+    assert.isNull(sniff("<html><svg></svg></html>"));
+    assert.isNull(sniff("plain text"));
+  });
+
   // Read from disk rather than from the watcher's last observation, so a
   // client connecting after a missed filesystem event still sees the truth.
   it.effect("follows the directory rather than the set read at start", () =>
@@ -229,7 +272,10 @@ it.layer(NodeServices.layer)("environment theme", (it) => {
     withEnvironmentThemes(
       {
         ...Object.fromEntries(
-          Array.from({ length: 7 }, (_, index) => [`junk-${index}.json`, "{".repeat(30_000)]),
+          Array.from({ length: 7 }, (_, index) => [
+            `junk-${index}.json`,
+            "{".repeat(EnvironmentTheme.MAX_THEME_FILE_BYTES),
+          ]),
         ),
         "zz-valid.json": encodeThemeFile(NIGHTFALL_THEME),
       },

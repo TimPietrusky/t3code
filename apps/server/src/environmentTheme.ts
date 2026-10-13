@@ -15,12 +15,14 @@
  * @module EnvironmentTheme
  */
 import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 import {
   EnvironmentTheme,
   EnvironmentThemeFile,
   EnvironmentThemeId,
   environmentThemeFileHasColors,
+  MAX_THEME_ASSETS_LENGTH,
 } from "@t3tools/contracts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
@@ -59,14 +61,19 @@ const THEME_FILE_SUFFIX = ".json";
  * cost of a mistake is capped rather than unbounded.
  */
 const MAX_THEME_FILES = 32;
-/** Exported so the publish path cannot accept a file the watcher will skip. */
-export const MAX_THEME_FILE_BYTES = 32 * 1024;
+/**
+ * Exported so the publish path cannot accept a file the watcher will skip.
+ * Room for the largest images a theme may carry plus its palette and CSS
+ * (JSON escaping can grow CSS several times over).
+ */
+export const MAX_THEME_FILE_BYTES = MAX_THEME_ASSETS_LENGTH + 128 * 1024;
 /**
  * The set travels whole in a websocket event to every subscriber, so the sum
- * matters more than any single file. An exported theme runs a few KB, leaving
- * this far above any real directory while keeping a mistake off the wire.
+ * matters more than any single file. Palette-only themes run a few KB; this
+ * leaves room for a handful of themes carrying full-size images while keeping
+ * an accidental dump off the wire.
  */
-const MAX_THEME_TOTAL_BYTES = 192 * 1024;
+const MAX_THEME_TOTAL_BYTES = 6 * MAX_THEME_FILE_BYTES;
 
 /** A publish or set the caller can fix: the message says how. */
 export class EnvironmentThemeRejectedError extends Schema.TaggedError<EnvironmentThemeRejectedError>()(
@@ -173,7 +180,11 @@ export class EnvironmentThemeService extends Context.Service<
  * leaves a window a swap could slip through, which the descriptor-bound
  * checks below then narrow to "a regular file at that path".
  */
-export const readThemeFileGuarded = (filePath: string, maxBytes: number): string | null => {
+export const readThemeFileGuarded = (filePath: string, maxBytes: number): string | null =>
+  readFileGuarded(filePath, maxBytes)?.toString("utf8") ?? null;
+
+/** The bytes behind readThemeFileGuarded, for files that are not text. */
+const readFileGuarded = (filePath: string, maxBytes: number): Buffer | null => {
   let fd: number;
   try {
     if (NodeFS.constants.O_NOFOLLOW === undefined && NodeFS.lstatSync(filePath).isSymbolicLink()) {
@@ -198,12 +209,72 @@ export const readThemeFileGuarded = (filePath: string, maxBytes: number): string
       if (read <= 0) break;
       offset += read;
     }
-    return contents.subarray(0, offset).toString("utf8");
+    return contents.subarray(0, offset);
   } catch {
     return null;
   } finally {
     NodeFS.closeSync(fd);
   }
+};
+
+/** Largest image file that still fits the asset budget once base64-encoded. */
+const MAX_THEME_ASSET_FILE_BYTES = Math.floor((MAX_THEME_ASSETS_LENGTH * 3) / 4);
+
+const ascii = (bytes: Buffer, start: number, end: number) =>
+  bytes.subarray(start, end).toString("latin1");
+
+/** The image type a file's leading bytes declare, or null for anything else. */
+export const sniffThemeAssetMimeType = (bytes: Buffer): string | null => {
+  if (bytes.length >= 8 && bytes.readUInt32BE(0) === 0x89504e47) return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (ascii(bytes, 0, 4) === "GIF8") return "image/gif";
+  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 12) === "WEBP") return "image/webp";
+  if (ascii(bytes, 4, 8) === "ftyp" && ["avif", "avis"].includes(ascii(bytes, 8, 12))) {
+    return "image/avif";
+  }
+  const head = bytes
+    .subarray(0, 1024)
+    .toString("utf8")
+    .replace(/^\uFEFF/, "")
+    .trimStart();
+  if (
+    /^(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*(?:<!DOCTYPE svg[^>]*>\s*)?<svg[\s>]/i.test(head)
+  ) {
+    return "image/svg+xml";
+  }
+  return null;
+};
+
+/**
+ * An image file on this machine as a theme asset data URI, so an agent can
+ * put a photo in a theme by path instead of pasting a megabyte of base64.
+ */
+export const readThemeAssetFile = (
+  filePath: string,
+): { readonly dataUri: string } | { readonly problem: string } => {
+  if (!NodePath.isAbsolute(filePath)) {
+    return { problem: `${filePath} is not an absolute path.` };
+  }
+  let size: number;
+  try {
+    size = NodeFS.statSync(filePath).size;
+  } catch {
+    return { problem: `${filePath} does not exist or cannot be read.` };
+  }
+  if (size > MAX_THEME_ASSET_FILE_BYTES) {
+    return {
+      problem: `${filePath} is ${Math.ceil(size / 1024)} KB; theme images are limited to ${Math.floor(MAX_THEME_ASSET_FILE_BYTES / 1024)} KB in total. Resize it (about 2400px wide as WebP or JPEG is plenty for a background).`,
+    };
+  }
+  const bytes = readFileGuarded(filePath, MAX_THEME_ASSET_FILE_BYTES);
+  if (bytes === null) return { problem: `${filePath} is not a regular file that can be read.` };
+  const mimeType = sniffThemeAssetMimeType(bytes);
+  if (mimeType === null) {
+    return { problem: `${filePath} is not a PNG, JPEG, WebP, AVIF, GIF or SVG image.` };
+  }
+  return { dataUri: `data:${mimeType};base64,${bytes.toString("base64")}` };
 };
 
 /**

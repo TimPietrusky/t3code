@@ -618,6 +618,61 @@ export const MAX_THEME_CSS_LENGTH = 16 * 1024;
 /** Custom CSS a client appends after its own styles while the theme is active. */
 export const ThemeCss = Schema.String.check(Schema.isMaxLength(MAX_THEME_CSS_LENGTH));
 
+/**
+ * Upper bound on a theme's images, summed over every data URI. Images ride
+ * inside the theme rather than being fetched, so a theme stays one portable
+ * file that renders offline, in the desktop app, and from a remote machine.
+ * Big enough for a full-window photo or two as WebP, small enough to keep a
+ * theme push and the browser's theme storage cheap.
+ */
+export const MAX_THEME_ASSETS_LENGTH = 1024 * 1024;
+export const MAX_THEME_ASSET_COUNT = 8;
+
+/** An asset's name, also its CSS variable: `bg` is `var(--t3-asset-bg)`. */
+export const THEME_ASSET_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+
+/**
+ * Base64 image data URIs only. The value is interpolated into `url("...")`,
+ * and the base64 alphabet cannot close the string or the declaration.
+ */
+export const THEME_ASSET_DATA_URI_PATTERN =
+  /^data:image\/(?:png|jpeg|webp|avif|gif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+/** The CSS custom property an asset is exposed as. */
+export const themeAssetVariable = (name: string): string => `--t3-asset-${name}`;
+
+/**
+ * Why a theme's assets cannot be used, or null when they can. Shared by the
+ * schema, the web client's parser, and the editor, so every entry point
+ * accepts the same images.
+ */
+export function themeAssetsProblem(assets: Readonly<Record<string, unknown>>): string | null {
+  const entries = Object.entries(assets);
+  if (entries.length > MAX_THEME_ASSET_COUNT) {
+    return `A theme can carry up to ${MAX_THEME_ASSET_COUNT} images (${entries.length} given).`;
+  }
+  let total = 0;
+  for (const [name, value] of entries) {
+    if (!THEME_ASSET_NAME_PATTERN.test(name)) {
+      return `"${name}" is not a valid image name: use up to 32 lowercase letters, digits and hyphens, starting with a letter.`;
+    }
+    if (typeof value !== "string" || !THEME_ASSET_DATA_URI_PATTERN.test(value)) {
+      return `The image "${name}" must be a base64 data URI (data:image/webp;base64,...) of a PNG, JPEG, WebP, AVIF, GIF or SVG.`;
+    }
+    total += value.length;
+  }
+  if (total > MAX_THEME_ASSETS_LENGTH) {
+    return `Theme images are limited to ${Math.round(MAX_THEME_ASSETS_LENGTH / 1024)} KB of data URIs (${Math.ceil(total / 1024).toLocaleString("en-US")} KB given).`;
+  }
+  return null;
+}
+
+/** Images a theme's CSS uses through `var(--t3-asset-<name>)`. */
+export const ThemeAssets = Schema.Record(Schema.String, Schema.String).check(
+  Schema.makeFilter((assets) => themeAssetsProblem(assets) ?? true),
+);
+export type ThemeAssets = typeof ThemeAssets.Type;
+
 const environmentThemeFields = {
   /**
    * Standard exported theme files (the Download button's output) carry
@@ -647,6 +702,11 @@ const environmentThemeFields = {
    * Older clients ignore the key, so a theme carrying it still recolors them.
    */
   css: Schema.optional(ThemeCss),
+  /**
+   * Optional images, name to base64 data URI, each exposed to `css` as
+   * `var(--t3-asset-<name>)` holding a `url()`. Older clients ignore the key.
+   */
+  assets: Schema.optional(ThemeAssets),
 };
 
 /** One published theme file. The id is the filename, not part of the content,

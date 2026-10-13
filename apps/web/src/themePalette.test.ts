@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { converter } from "culori/fn";
 import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
 
-import { MAX_THEME_CSS_LENGTH } from "@t3tools/contracts";
+import { MAX_THEME_ASSETS_LENGTH, MAX_THEME_CSS_LENGTH } from "@t3tools/contracts";
 
 import {
   applyThemeColorPreview,
@@ -29,6 +29,7 @@ import {
   resolveThemeAppearance,
   serializeThemeFile,
   subscribeToThemePreview,
+  themeAssetsCss,
   subscribeToCustomThemes,
   themeAllowsSidebarArtwork,
   T3_CHAT_THEME,
@@ -1300,6 +1301,23 @@ describe("theme css", () => {
     }
   });
 
+  it("installs the sheet for images alone and puts their variables before the css", () => {
+    const body = stubThemeCssDocument();
+    const photo = "data:image/webp;base64,UklGRg==";
+    try {
+      applyThemeCss(undefined, { photo });
+      expect(body[0]?.textContent).toBe(`:root {\n  --t3-asset-photo: url("${photo}");\n}\n`);
+      applyThemeCss(PINK_CSS, { photo });
+      expect(body).toHaveLength(1);
+      expect(body[0]?.textContent?.endsWith(PINK_CSS)).toBe(true);
+      expect(body[0]?.textContent?.startsWith(":root {")).toBe(true);
+      applyThemeCss(undefined, {});
+      expect(body).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("follows the applied theme: its css lands with the palette and leaves with it", () => {
     const themed = {
       id: "pink-love",
@@ -1328,6 +1346,76 @@ describe("theme css", () => {
       applyThemePalette("pink-love", "light");
       applyThemePalette("system");
       expect(body).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+      invalidateCustomThemes();
+    }
+  });
+});
+
+describe("theme assets", () => {
+  const PHOTO = "data:image/webp;base64,UklGRg==";
+  const file = {
+    version: THEME_FILE_VERSION,
+    name: "Meadow",
+    appearance: "light",
+    colors: { canvas: "#f4fbef" },
+  };
+
+  it("round-trips images through exported theme files", () => {
+    const theme = parseThemeFile({ ...file, assets: { meadow: PHOTO } });
+    expect(theme.assets).toEqual({ meadow: PHOTO });
+    expect(parseThemeFile(JSON.parse(serializeThemeFile(theme))).assets).toEqual({
+      meadow: PHOTO,
+    });
+    expect(parseThemeFile({ ...file, assets: {} })).not.toHaveProperty("assets");
+  });
+
+  it("rejects images that are remote, could break out of url(), or exceed the budget", () => {
+    expect(() => parseThemeFile({ ...file, assets: [] })).toThrow(/must be an object/);
+    expect(() =>
+      parseThemeFile({ ...file, assets: { meadow: "https://example.com/m.webp" } }),
+    ).toThrow(/base64 data URI/);
+    expect(() =>
+      parseThemeFile({ ...file, assets: { meadow: 'data:image/png;base64,AA");x{' } }),
+    ).toThrow(/base64 data URI/);
+    expect(() => parseThemeFile({ ...file, assets: { Meadow: PHOTO } })).toThrow(
+      /not a valid image name/,
+    );
+    const prefix = "data:image/png;base64,";
+    const huge = `${prefix}${"A".repeat(MAX_THEME_ASSETS_LENGTH)}`;
+    expect(() => parseThemeFile({ ...file, assets: { meadow: huge } })).toThrow(/limited to/);
+  });
+
+  it("exposes each image as a --t3-asset variable ahead of the theme css", () => {
+    expect(themeAssetsCss(undefined)).toBe("");
+    expect(themeAssetsCss({ meadow: PHOTO, "bad name": PHOTO })).toBe(
+      `:root {\n  --t3-asset-meadow: url("${PHOTO}");\n}\n`,
+    );
+  });
+
+  it("drops unusable stored images without losing the theme or its css", () => {
+    const stored = [
+      {
+        id: "meadow",
+        label: "Meadow",
+        appearance: "light",
+        colors: {},
+        css: "body { color: green; }",
+        assets: { meadow: "javascript:alert(1)" },
+      },
+    ];
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) =>
+          key === CUSTOM_THEMES_STORAGE_KEY ? JSON.stringify(stored) : null,
+      },
+    });
+    invalidateCustomThemes();
+    try {
+      const [theme] = getCustomThemes();
+      expect(theme?.css).toBe("body { color: green; }");
+      expect(theme).not.toHaveProperty("assets");
     } finally {
       vi.unstubAllGlobals();
       invalidateCustomThemes();

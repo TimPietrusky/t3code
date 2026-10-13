@@ -69,6 +69,9 @@ export function environmentThemeDefinition(theme: EnvironmentTheme): ThemeDefini
       ? { managed: true }
       : {}),
     ...(theme.css !== undefined && theme.css.trim().length > 0 ? { css: theme.css } : {}),
+    ...(theme.assets !== undefined && Object.keys(theme.assets).length > 0
+      ? { assets: theme.assets }
+      : {}),
   };
 }
 

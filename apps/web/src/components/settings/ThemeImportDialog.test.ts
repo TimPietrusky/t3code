@@ -12,10 +12,11 @@ describe("theme import size guard", () => {
   it("rejects a file too large to be a theme and names its size", () => {
     const message = describeOversizedThemeFile(100 * 1024 * 1024);
     expect(message).toContain("100.0 MB");
-    expect(message).toContain("256 KB");
+    expect(message).toContain("1.3 MB");
   });
 
-  it("reports sizes just past the limit in KB", () => {
-    expect(describeOversizedThemeFile(MAX_THEME_FILE_BYTES + 1)).toContain("256 KB");
+  it("leaves room for a theme carrying a full-window photo", () => {
+    expect(describeOversizedThemeFile(1024 * 1024)).toBeNull();
+    expect(describeOversizedThemeFile(MAX_THEME_FILE_BYTES + 1)).toContain("limit 1.3 MB");
   });
 });

@@ -53,6 +53,16 @@ describe("environment themes", () => {
     expect(environmentThemeDefinition({ ...NIGHTFALL_THEME, css: "  " })).not.toHaveProperty("css");
   });
 
+  it("carries published images and drops an empty set", () => {
+    const photo = "data:image/webp;base64,UklGRg==";
+    expect(environmentThemeDefinition({ ...NIGHTFALL_THEME, assets: { photo } }).assets).toEqual({
+      photo,
+    });
+    expect(environmentThemeDefinition({ ...NIGHTFALL_THEME, assets: {} })).not.toHaveProperty(
+      "assets",
+    );
+  });
+
   // The standard exported theme file — the Download button's output — is a
   // valid published theme, so any shared theme can be dropped into the
   // machine's themes directory as-is.
