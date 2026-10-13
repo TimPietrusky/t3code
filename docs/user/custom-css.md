@@ -38,13 +38,21 @@ the desktop app, and on every computer the theme reaches. Each image is a CSS va
 
 ```css
 [data-t3-part="app-shell"] {
-  background: var(--t3-asset-meadow) center / cover no-repeat;
+  background: var(--t3-asset-meadow) center / cover no-repeat fixed;
+}
+/* Clear the main area and sidebar surfaces so the photo shows through. */
+[data-t3-part="main"] {
+  --app-theme-canvas: transparent;
 }
 [data-t3-part="sidebar"] {
-  background: color-mix(in oklab, var(--app-theme-sidebar) 70%, transparent);
+  --app-theme-sidebar: transparent;
+  background: rgb(255 255 255 / 0.7);
   backdrop-filter: blur(18px);
 }
 ```
+
+Setting `--app-theme-canvas` on `main`, or `--app-theme-sidebar` on `sidebar`, changes only that
+region's surface.
 
 - **Theme editor:** on the **CSS** tab, click **Add image** below the stylesheet. Photos are
   resized and saved as WebP so they fit.
@@ -55,7 +63,9 @@ the desktop app, and on every computer the theme reaches. Each image is a CSS va
 
 A theme holds up to 8 images and 1 MB of data URIs, about 750 KB of image files. A photo about
 2400 pixels wide as WebP or JPEG is plenty for a full-window background. Keep text readable with
-translucent, blurred panels over the photo, or darken it with a gradient in the same `background`.
+translucent panels over the photo, or darken it with a gradient in the same `background`. Blur
+works on the sidebar and header but not inside the conversation, so give messages a background
+that is about 80-90% opaque.
 Themes you save in the app keep their images in browser storage, which has room for a few image
 themes, so remove images you no longer use.
 
