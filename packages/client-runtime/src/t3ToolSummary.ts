@@ -336,6 +336,12 @@ export function summarizeT3ToolCalls(
     case "environment-update":
       label = phrase("Updated", "update", `environment preferences ${times}`);
       break;
+    case "theme-read":
+      label = phrase("Checked", "check", `themes ${times}`);
+      break;
+    case "theme-update":
+      label = phrase("Updated", "update", `the theme ${times}`);
+      break;
     case "attachment-prepare":
       label = phrase(
         "Prepared",

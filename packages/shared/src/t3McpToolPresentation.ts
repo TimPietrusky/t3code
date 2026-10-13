@@ -51,6 +51,8 @@ export type T3McpToolSummaryAction =
   | "project-clone"
   | "environment-read"
   | "environment-update"
+  | "theme-read"
+  | "theme-update"
   | "attachment-prepare"
   | "attachment-discard"
   | "attachment-send"
@@ -314,6 +316,11 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     ["Update", "Updating", "Updated", "environment preferences"],
     "environment-update",
   ),
+  t3_theme_guide: tool(["Read", "Reading", "Read", "the theme guide"], "theme-read"),
+  t3_theme_list: tool(["List", "Listing", "Listed", "themes"], "theme-read"),
+  t3_theme_read: tool(["Read", "Reading", "Read", "a theme"], "theme-read"),
+  t3_theme_write: tool(["Write", "Writing", "Wrote", "a theme"], "theme-update"),
+  t3_theme_set: tool(["Set", "Setting", "Set", "the T3 Code theme"], "theme-update"),
   t3_thread_launch: tool(["Launch", "Launching", "Launched", "a project thread"], "thread-create"),
   t3_project_list: tool(["List", "Listing", "Listed", "projects"], "project-list"),
   t3_project_read: tool(["Read", "Reading", "Read", "a project"], "project-read"),

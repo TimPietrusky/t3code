@@ -1,4 +1,5 @@
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
+import * as EnvironmentTheme from "../../../environmentTheme.ts";
 import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
 import * as DeviceService from "../../../device/DeviceService.ts";
 import * as ServerConfig from "../../../config.ts";
@@ -57,6 +58,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
+  Layer.mock(EnvironmentTheme.EnvironmentThemeService)({ themesDirectory: "/unused" }),
 );
 
 const ToolsListPayload = Schema.fromJsonString(
