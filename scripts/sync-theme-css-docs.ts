@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off - a tiny standalone docs generator.
 // Regenerates the data-t3-part reference in docs/user/custom-css.md from
 // packages/shared/src/themeCssReference.ts. `--check` fails instead of writing.
 import * as NodeFS from "node:fs";

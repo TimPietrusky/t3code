@@ -94,7 +94,7 @@ const call = (name: keyof typeof ThemeToolkit.tools, params: unknown) =>
     const results = yield* toolkit
       .handle(name as never, params as never)
       .pipe(Stream.unwrap, Stream.runCollect);
-    return results.at(-1)?.result as Record<string, unknown> & {
+    return results.at(-1)?.result as unknown as Record<string, unknown> & {
       readonly code?: string;
       readonly message?: string;
     };

@@ -1,9 +1,10 @@
+// @effect-diagnostics nodeBuiltinImport:off - a plain file read of the repo's own docs.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import { syncThemeCssReferenceDocs, THEME_CSS_PARTS } from "./themeCssReference";
+import { syncThemeCssReferenceDocs, THEME_CSS_PARTS } from "./themeCssReference.ts";
 
 const repoRoot = NodePath.join(import.meta.dirname, "..", "..", "..");
 
