@@ -45,6 +45,17 @@ change. Export your theme as JSON to share it.
 A theme can also restyle the app with its own CSS: hide or rearrange small parts, change type and
 spacing, and more. See [Custom CSS in themes](./custom-css.md).
 
+## Ask your agent
+
+Agents running in T3 Code can restyle it for you. Ask in plain language, for example "make T3 Code
+mint green with tiny one-line thread titles" or "hide the project icons in the sidebar". The agent
+writes a theme, including [custom CSS](./custom-css.md), and switches web and desktop clients
+connected to this machine to it. Ask again to adjust it; clients showing it update as it changes.
+
+The thread needs **Full access**. The theme is published on the machine the agent runs on, like the
+themes below, so you can still pick another theme in **Settings → Appearance**. If you saved your
+own theme under the same id, your copy wins on that device.
+
 ## Environment themes
 
 Environment themes and defaults come from the server serving your web app or the desktop app's

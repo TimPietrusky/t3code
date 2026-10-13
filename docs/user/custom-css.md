@@ -11,6 +11,7 @@ removes it. Mobile ignores theme CSS.
   files include the CSS, and importing a file brings it back.
 - **Theme file:** add a `css` string to an exported theme file or a published theme in
   `~/.t3/userdata/themes/` (see [Publish a theme](./appearance.md#publish-a-theme)).
+- **Ask your agent:** see [Ask your agent](./appearance.md#ask-your-agent).
 
 ```json
 {
@@ -45,6 +46,9 @@ controls or break resizing. Avoid animations that run continuously; they keep th
 
 Your rules already beat the built-in utility classes. You only need `!important` for the rare
 built-in rule that is itself marked important.
+
+Keep everything in the theme: the desktop app does not load stylesheets or fonts from other
+sites, so `@import` and web fonts by URL are ignored there. Use fonts installed on the computer.
 
 <!-- /generated:theme-css-rules -->
 

@@ -26,9 +26,13 @@ Style with Tailwind classes in the component that renders the element.
 Themes can carry CSS ([user guide](../user/custom-css.md)) that targets `data-t3-part`
 attributes. Those names are a public contract with users' themes: renaming or removing one, or
 moving it to an element with a different role, silently breaks themes nobody here can see. Keep
-the part on the element when restructuring, and add a part (and a line in the user guide) when a
-new region is one people will want to restyle. Parts must not change the default look; a slot that
-only exists for themes, such as `thread-project`, renders hidden.
+the part on the element when restructuring, and add a part when a new region is one people will
+want to restyle. Parts must not change the default look; a slot that only exists for themes, such
+as `thread-project`, renders hidden.
+
+Parts are listed once, in [`themeCssReference.ts`](../../packages/shared/src/themeCssReference.ts),
+which feeds the user guide (`node scripts/sync-theme-css-docs.ts`) and the `t3_theme_guide` MCP
+tool agents read. A test fails when that list and the parts the web app renders disagree.
 
 ## Composition
 
