@@ -3,7 +3,7 @@
 Example themes for a proposed T3 Code feature: themes that carry their own CSS, stable
 `data-t3-part` hooks to target, and theme tools agents can call through the T3 Code MCP server.
 
-- Proposal: [Ideas discussion on pingdotgg/t3code](https://github.com/pingdotgg/t3code/discussions/categories/ideas)
+- Proposal: [Ideas discussion on pingdotgg/t3code](https://github.com/pingdotgg/t3code/discussions/19088)
 - Code: the [`custom-css-theming`](https://github.com/TimPietrusky/t3code/tree/custom-css-theming) branch
 
 > Custom CSS isn't in a released T3 Code yet. In a current release, importing one of these themes
