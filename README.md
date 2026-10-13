@@ -1,6 +1,6 @@
 # T3 Code custom CSS theme showcase
 
-![All fourteen themes](images/gallery.png)
+![All 24 themes](images/gallery.png)
 
 Example themes for a proposed T3 Code feature: themes that carry their own CSS, stable
 `data-t3-part` hooks to target, and theme tools agents can call through the T3 Code MCP server.
@@ -19,8 +19,8 @@ Example themes for a proposed T3 Code feature: themes that carry their own CSS, 
 - **Ask your agent:** with the theme tools, hand it a file or describe the look you want in a thread
   with Full access.
 
-\* Meadow and Orbital embed their background photos, which needs the images-in-themes support on the
-`custom-css-theming` branch. Photo credits: [`themes/ASSET-CREDITS.md`](themes/ASSET-CREDITS.md).
+\* Themes marked with * embed their own images (photos or original art), which needs the images-in-themes
+support on the `custom-css-theming` branch. Credits: [`themes/ASSET-CREDITS.md`](themes/ASSET-CREDITS.md).
 
 ## Themes
 
@@ -135,6 +135,86 @@ Mission control glass over Earth, shot from the ISS. Carries its own photos.*
 ![Orbital](images/orbital-full.png)
 
 [`themes/orbital.json`](themes/orbital.json) · [sidebar](images/orbital-sidebar.png)
+
+### Speedline
+
+A black-and-white manga spread: inked panels for threads, a strip of manga frames and an original rooftop hero beside the chat. Carries its own art.*
+
+![Speedline](images/speedline-full.png)
+
+[`themes/speedline.json`](themes/speedline.json) · [sidebar](images/speedline-sidebar.png) · [dark](images/speedline-dark-full.png)
+
+### Kumori Skies
+
+An anime key visual: Kumori, an original cloud-hood sky spirit, sits on a summer cumulus next to the chat and waves from the sidebar. Carries its own art.*
+
+![Kumori Skies](images/kumori-skies-full.png)
+
+[`themes/kumori-skies.json`](themes/kumori-skies.json) · [sidebar](images/kumori-skies-sidebar.png) · [dark](images/kumori-skies-dark-full.png)
+
+### Pocket Wilds
+
+A painted anime battlefield with Lumoss, an original moss creature, party slots for threads and a battle text box for the composer. Carries its own art.*
+
+![Pocket Wilds](images/pocket-wilds-full.png)
+
+[`themes/pocket-wilds.json`](themes/pocket-wilds.json) · [sidebar](images/pocket-wilds-sidebar.png) · [dark](images/pocket-wilds-dark-full.png)
+
+### Pit Wall
+
+Race control: a timing tower for threads, team-radio messages, a track map and a tyre panel. Light mode is daylight broadcast.*
+
+![Pit Wall](images/pit-wall-full.png)
+
+[`themes/pit-wall.json`](themes/pit-wall.json) · [sidebar](images/pit-wall-sidebar.png) · [light](images/pit-wall-light-full.png)
+
+### Fossil Field Notes
+
+An expedition journal: specimen tags for threads and graph-paper pages over Charles R. Knight's 1897 *Leaping Laelaps* (public domain).*
+
+![Fossil Field Notes](images/fossil-notes-full.png)
+
+[`themes/fossil-notes.json`](themes/fossil-notes.json) · [sidebar](images/fossil-notes-sidebar.png) · [dark](images/fossil-notes-dark-full.png)
+
+### Gumdrop Parlor
+
+A candy shop: striped awning, wrapped-candy threads, frosting drips, sprinkles, a gumdrop jar and a peppermint composer.*
+
+![Gumdrop Parlor](images/gumdrop-parlor-full.png)
+
+[`themes/gumdrop-parlor.json`](themes/gumdrop-parlor.json) · [sidebar](images/gumdrop-parlor-sidebar.png) · [dark](images/gumdrop-parlor-dark-full.png)
+
+### Mochi Hug
+
+Plushie stitches and die-cut stickers with three original mochi friends: Mochi, Ichigo and Matcha.*
+
+![Mochi Hug](images/mochi-hug-full.png)
+
+[`themes/mochi-hug.json`](themes/mochi-hug.json) · [sidebar](images/mochi-hug-sidebar.png) · [dark](images/mochi-hug-dark-full.png)
+
+### Cube Frontier
+
+A blocky sandbox world: inventory slots for threads, a pixel landscape, signboard messages and a hotbar composer with hearts.*
+
+![Cube Frontier](images/cube-frontier-full.png)
+
+[`themes/cube-frontier.json`](themes/cube-frontier.json) · [sidebar](images/cube-frontier-sidebar.png) · [light](images/cube-frontier-light-full.png)
+
+### Brick Quest
+
+A side-scrolling platformer level: a brick sidebar, star blocks for threads, warp pipes, coins and a score HUD. Original pixel art.*
+
+![Brick Quest](images/brick-quest-full.png)
+
+[`themes/brick-quest.json`](themes/brick-quest.json) · [sidebar](images/brick-quest-sidebar.png) · [dark](images/brick-quest-dark-full.png)
+
+### Hollow Pines 1984
+
+A small town after dark: cassette tapes for threads, a foggy pine forest, string lights and a VHS on-screen display.*
+
+![Hollow Pines 1984](images/hollow-pines-full.png)
+
+[`themes/hollow-pines.json`](themes/hollow-pines.json) · [sidebar](images/hollow-pines-sidebar.png) · [light](images/hollow-pines-light-full.png)
 
 ## An agent restyles the app from one prompt
 
