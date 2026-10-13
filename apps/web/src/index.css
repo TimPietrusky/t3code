@@ -1488,6 +1488,14 @@ html[data-theme-id="t3-chat"] {
   }
 }
 
+/* Like the sidebar below, the main area re-resolves its surface from the
+   palette role, so theme CSS can retint or clear just that region by setting
+   --app-theme-canvas on [data-t3-part="main"] -- transparent lets a theme
+   image on the app shell show through. */
+html[data-theme-id] [data-t3-part="main"] {
+  --background: var(--app-theme-canvas);
+}
+
 html[data-theme-id] [data-app-sidebar] {
   --background: var(--app-theme-canvas);
   --foreground: var(--app-theme-text);
