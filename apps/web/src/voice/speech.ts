@@ -1,9 +1,12 @@
 /**
- * Hands-free speech for t3 voice: one open microphone, an energy-based voice detector, utterances
- * transcribed through the dev server's `/__t3voice/stt`, and replies spoken through
- * `/__t3voice/tts`. Speaking over a reply stops it (barge-in). Audio never leaves the browser except
- * to the dev server, and nothing is kept after transcription.
+ * Hands-free speech for t3 voice: open mic, energy voice detection, realtime speech-to-text, and
+ * replies spoken sentence by sentence. Barge-in only fires when the mic is clearly louder than the
+ * echo of what is playing, and transcripts of our own words are dropped (laptop speakers).
  */
+import { SpeechPlayer } from "./player";
+import { RealtimeStt, STT_SAMPLE_RATE } from "./realtimeStt";
+import { isEchoOfSpoken, speakableText } from "./speechText";
+
 export type VoicePhase = "off" | "listening" | "hearing" | "transcribing" | "speaking";
 
 export type VoiceSessionEvents = {
@@ -12,210 +15,227 @@ export type VoiceSessionEvents = {
   readonly onError: (message: string) => void;
 };
 
-const FRAME_MS = 30;
-const SPEECH_START_MS = 150;
-const BARGE_IN_MS = 300;
-const SPEECH_END_MS = 850;
-const MIN_SPEECH_MS = 350;
-const RECYCLE_IDLE_MS = 20_000;
+const FRAME_MS = 20;
+const FRAME_SAMPLES = (STT_SAMPLE_RATE * FRAME_MS) / 1000;
+const PRE_ROLL_FRAMES = 15;
+const SPEECH_START_MS = 120;
+const BARGE_IN_MS = 240;
+const SPEECH_END_MS = 600;
+const MIN_SPEECH_MS = 300;
 const MIN_LEVEL = 0.012;
-const MIN_BARGE_IN_LEVEL = 0.035;
+const MIN_BARGE_IN_LEVEL = 0.03;
+const ECHO_WINDOW_FRAMES = 12;
+const ECHO_MARGIN = 2;
+const INITIAL_ECHO_COUPLING = 0.5;
 
-/** Replies are written for the ear, but strip any markdown that slips through before speaking. */
-export function speakableText(text: string): string {
-  const spoken = text
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]*)`/g, "$1")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/^\s{0,3}(#{1,6}|[-*+]|\d+\.)\s+/gm, "")
-    .replace(/[*_~>|]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return /\p{L}/u.test(spoken) ? spoken.slice(0, 700) : "";
+// Captures the microphone as 16 kHz mono PCM in 20 ms frames, with each frame's level.
+const CAPTURE_WORKLET = `
+class T3VoiceCapture extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.step = sampleRate / ${STT_SAMPLE_RATE};
+    this.position = 0;
+    this.frame = new Int16Array(${FRAME_SAMPLES});
+    this.filled = 0;
+    this.energy = 0;
+  }
+  process(inputs) {
+    const input = inputs[0] && inputs[0][0];
+    if (!input) return true;
+    for (; this.position < input.length; this.position += this.step) {
+      const sample = Math.max(-1, Math.min(1, input[Math.floor(this.position)]));
+      this.energy += sample * sample;
+      this.frame[this.filled++] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      if (this.filled === this.frame.length) {
+        const level = Math.sqrt(this.energy / this.filled);
+        this.port.postMessage({ pcm: this.frame, level }, [this.frame.buffer]);
+        this.frame = new Int16Array(${FRAME_SAMPLES});
+        this.filled = 0;
+        this.energy = 0;
+      }
+    }
+    this.position -= input.length;
+    return true;
+  }
 }
+registerProcessor("t3voice-capture", T3VoiceCapture);
+`;
 
 export class VoiceSession {
   private stream: MediaStream | null = null;
   private context: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
-  private frame: Float32Array<ArrayBuffer> | null = null;
-  private timer: number | null = null;
-  private recorder: MediaRecorder | null = null;
-  private chunks: Blob[] = [];
-  private recorderStartedAt = 0;
+  private capture: AudioWorkletNode | null = null;
+  private player: SpeechPlayer | null = null;
+  private readonly stt = new RealtimeStt();
+  private preRoll: Int16Array[] = [];
   private noiseFloor = MIN_LEVEL / 3;
+  private echoCoupling = INITIAL_ECHO_COUPLING;
+  private playedLevels: number[] = [];
   private loudMs = 0;
   private quietMs = 0;
   private speechMs = 0;
   private inSpeech = false;
-  private bargedIn = false;
-  private queue: string[] = [];
-  private audio: HTMLAudioElement | null = null;
-  private speaking = false;
   private pendingTranscriptions = 0;
   private phase: VoicePhase = "off";
 
   constructor(private readonly events: VoiceSessionEvents) {}
 
-  async start(): Promise<void> {
-    if (this.stream !== null) return;
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-    this.context = new AudioContext();
-    const source = this.context.createMediaStreamSource(this.stream);
-    this.analyser = this.context.createAnalyser();
-    this.analyser.fftSize = 1024;
-    source.connect(this.analyser);
-    this.frame = new Float32Array(this.analyser.fftSize);
-    this.startRecorder();
-    this.timer = window.setInterval(() => this.tick(), FRAME_MS);
-    this.updatePhase();
-  }
-
-  stop(): void {
-    if (this.timer !== null) window.clearInterval(this.timer);
-    this.timer = null;
-    this.stopSpeaking();
-    this.discardRecorder();
-    for (const track of this.stream?.getTracks() ?? []) track.stop();
-    void this.context?.close();
-    this.stream = null;
-    this.context = null;
-    this.analyser = null;
-    this.inSpeech = false;
-    this.setPhase("off");
-  }
-
   get active(): boolean {
     return this.stream !== null;
   }
 
+  async start(): Promise<void> {
+    if (this.stream !== null) return;
+    this.stt.warm();
+    this.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    const context = new AudioContext();
+    this.context = context;
+    const moduleUrl = URL.createObjectURL(
+      new Blob([CAPTURE_WORKLET], { type: "application/javascript" }),
+    );
+    await context.audioWorklet.addModule(moduleUrl);
+    URL.revokeObjectURL(moduleUrl);
+    const capture = new AudioWorkletNode(context, "t3voice-capture");
+    capture.port.onmessage = (event: MessageEvent<{ pcm: Int16Array; level: number }>) =>
+      this.onFrame(event.data.pcm, event.data.level);
+    context.createMediaStreamSource(this.stream).connect(capture);
+    // A silent sink keeps the capture node pulled by the audio graph.
+    const sink = context.createGain();
+    sink.gain.value = 0;
+    capture.connect(sink).connect(context.destination);
+    this.capture = capture;
+    this.player = new SpeechPlayer(
+      context,
+      (speaking) => {
+        if (!speaking) this.playedLevels = [];
+        this.updatePhase();
+      },
+      this.events.onError,
+    );
+    this.updatePhase();
+  }
+
+  stop(): void {
+    this.player?.stop();
+    this.stt.close();
+    if (this.capture !== null) this.capture.port.onmessage = null;
+    for (const track of this.stream?.getTracks() ?? []) track.stop();
+    void this.context?.close();
+    this.stream = null;
+    this.context = null;
+    this.capture = null;
+    this.player = null;
+    this.inSpeech = false;
+    this.setPhase("off");
+  }
+
+  /** Queues one sentence of a reply; empty or markdown-only text stays silent. */
   speak(text: string): void {
     const spoken = speakableText(text);
-    if (spoken === "" || this.stream === null) return;
-    this.queue.push(spoken);
-    if (!this.speaking) void this.playNext();
+    if (spoken !== "") this.player?.speak(spoken);
   }
 
   stopSpeaking(): void {
-    this.queue = [];
-    this.speaking = false;
-    if (this.audio !== null) {
-      this.audio.pause();
-      URL.revokeObjectURL(this.audio.src);
-      this.audio = null;
-    }
-    this.updatePhase();
+    this.player?.stop();
   }
 
-  private async playNext(): Promise<void> {
-    const text = this.queue.shift();
-    if (text === undefined) {
-      this.speaking = false;
-      // Whatever the mic caught while we talked is mostly our own echo.
-      if (!this.inSpeech) this.restartRecorder();
-      this.updatePhase();
-      return;
-    }
-    this.speaking = true;
-    this.bargedIn = false;
-    this.updatePhase();
-    try {
-      const response = await fetch("/__t3voice/tts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (!response.ok) throw new Error(`speech failed (${response.status})`);
-      const blob = await response.blob();
-      if (!this.speaking) return;
-      if (!this.inSpeech) this.restartRecorder();
-      const audio = new Audio(URL.createObjectURL(blob));
-      this.audio = audio;
-      await new Promise<void>((resolve) => {
-        audio.onended = () => resolve();
-        audio.onerror = () => resolve();
-        audio.onpause = () => resolve();
-        void audio.play().catch(() => resolve());
-      });
-      URL.revokeObjectURL(audio.src);
-      if (this.audio === audio) this.audio = null;
-    } catch (error) {
-      this.events.onError(error instanceof Error ? error.message : String(error));
-    }
-    if (this.speaking) void this.playNext();
-  }
+  private onFrame(pcm: Int16Array, level: number): void {
+    const player = this.player;
+    if (player === null) return;
+    const speaking = player.speaking;
 
-  private tick(): void {
-    if (this.analyser === null || this.frame === null) return;
-    this.analyser.getFloatTimeDomainData(this.frame);
-    let sum = 0;
-    for (const sample of this.frame) sum += sample * sample;
-    const level = Math.sqrt(sum / this.frame.length);
+    // What the speakers are putting out over the last ~quarter second bounds the echo we can hear.
+    let reference = 0;
+    if (speaking) {
+      this.playedLevels.push(player.level());
+      if (this.playedLevels.length > ECHO_WINDOW_FRAMES) this.playedLevels.shift();
+      reference = Math.max(...this.playedLevels);
+    }
 
-    const threshold = this.speaking
-      ? Math.max(MIN_BARGE_IN_LEVEL, this.noiseFloor * 6)
+    const threshold = speaking
+      ? Math.max(
+          MIN_BARGE_IN_LEVEL,
+          this.noiseFloor * 4,
+          this.echoCoupling * reference * ECHO_MARGIN,
+        )
       : Math.max(MIN_LEVEL, this.noiseFloor * 3);
     const loud = level > threshold;
-    if (!loud && !this.inSpeech) {
-      this.noiseFloor = this.noiseFloor * 0.95 + level * 0.05;
+
+    if (!this.inSpeech) {
+      if (speaking && reference > 0.01) this.learnEchoCoupling(level / reference);
+      else if (!loud && !speaking) this.noiseFloor = this.noiseFloor * 0.95 + level * 0.05;
     }
 
     if (loud) {
       this.loudMs += FRAME_MS;
       this.quietMs = 0;
     } else {
-      this.loudMs = 0;
+      // One quiet frame inside speech does not end the run.
+      this.loudMs = Math.max(0, this.loudMs - FRAME_MS);
       this.quietMs += FRAME_MS;
     }
 
     if (!this.inSpeech) {
-      if (this.speaking && this.loudMs >= BARGE_IN_MS) {
-        // Tim talks over the reply: stop it and treat this as a new utterance.
-        this.bargedIn = true;
-        this.stopSpeaking();
+      this.preRoll.push(pcm);
+      if (this.preRoll.length > PRE_ROLL_FRAMES) this.preRoll.shift();
+      const startAfter = speaking ? BARGE_IN_MS : SPEECH_START_MS;
+      if (this.loudMs >= startAfter) {
+        if (speaking) player.stop();
         this.beginSpeech();
-      } else if (!this.speaking && this.loudMs >= SPEECH_START_MS) {
-        this.beginSpeech();
-      } else if (!this.speaking && performance.now() - this.recorderStartedAt > RECYCLE_IDLE_MS) {
-        this.restartRecorder();
       }
       return;
     }
 
+    this.stt.push(pcm);
     this.speechMs += FRAME_MS;
     if (this.quietMs >= SPEECH_END_MS) {
       const spokeLongEnough = this.speechMs - this.quietMs >= MIN_SPEECH_MS;
       this.inSpeech = false;
       this.speechMs = 0;
+      this.loudMs = 0;
       if (spokeLongEnough) this.finishUtterance();
-      else this.restartRecorder();
+      else this.stt.discard();
       this.updatePhase();
     }
   }
 
+  /** Tracks how loud our own speech comes back through the mic, without learning from Tim. */
+  private learnEchoCoupling(ratio: number): void {
+    if (ratio > this.echoCoupling * ECHO_MARGIN) return;
+    const rate = ratio > this.echoCoupling ? 0.2 : 0.02;
+    this.echoCoupling = Math.max(0.02, this.echoCoupling * (1 - rate) + ratio * rate);
+  }
+
   private beginSpeech(): void {
+    this.stt.warm();
     this.inSpeech = true;
     this.speechMs = this.loudMs;
+    this.stt.discard();
+    for (const frame of this.preRoll) this.stt.push(frame);
+    this.preRoll = [];
     this.updatePhase();
   }
 
   private finishUtterance(): void {
-    const recorder = this.recorder;
-    if (recorder === null) return;
-    const chunks = this.chunks;
-    this.recorder = null;
-    this.chunks = [];
     this.pendingTranscriptions += 1;
-    this.updatePhase();
     this.blip();
-    recorder.onstop = () => {
-      const audio = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-      void this.transcribe(audio);
-    };
-    recorder.stop();
-    this.startRecorder();
+    this.updatePhase();
+    void this.stt
+      .commit()
+      .then((text) => {
+        if (!/\p{L}/u.test(text) || this.stream === null) return;
+        if (isEchoOfSpoken(text, this.player?.recentlySpoken() ?? [])) return;
+        this.events.onUtterance(text);
+      })
+      .catch((error: unknown) => {
+        this.events.onError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        this.pendingTranscriptions -= 1;
+        this.updatePhase();
+      });
   }
 
   /** A soft tick the moment an utterance is captured, so Tim hears he was heard. */
@@ -232,60 +252,10 @@ export class VoiceSession {
     oscillator.stop(context.currentTime + 0.12);
   }
 
-  private async transcribe(audio: Blob): Promise<void> {
-    try {
-      const response = await fetch("/__t3voice/stt", {
-        method: "POST",
-        headers: { "content-type": audio.type },
-        body: audio,
-      });
-      const body = (await response.json()) as { text?: string; error?: string };
-      if (!response.ok) throw new Error(body.error ?? `transcription failed (${response.status})`);
-      const text = body.text?.trim() ?? "";
-      if (/\p{L}/u.test(text) && this.stream !== null) this.events.onUtterance(text);
-    } catch (error) {
-      this.events.onError(error instanceof Error ? error.message : String(error));
-    } finally {
-      this.pendingTranscriptions -= 1;
-      this.updatePhase();
-    }
-  }
-
-  private startRecorder(): void {
-    if (this.stream === null) return;
-    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus"
-      : "";
-    const recorder = new MediaRecorder(this.stream, mimeType ? { mimeType } : undefined);
-    this.chunks = [];
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) this.chunks.push(event.data);
-    };
-    recorder.start(250);
-    this.recorder = recorder;
-    this.recorderStartedAt = performance.now();
-  }
-
-  private discardRecorder(): void {
-    const recorder = this.recorder;
-    this.recorder = null;
-    this.chunks = [];
-    if (recorder !== null && recorder.state !== "inactive") {
-      recorder.ondataavailable = null;
-      recorder.stop();
-    }
-  }
-
-  private restartRecorder(): void {
-    if (this.bargedIn && this.inSpeech) return;
-    this.discardRecorder();
-    this.startRecorder();
-  }
-
   private updatePhase(): void {
     if (this.stream === null) return this.setPhase("off");
     if (this.inSpeech) return this.setPhase("hearing");
-    if (this.speaking) return this.setPhase("speaking");
+    if (this.player?.speaking) return this.setPhase("speaking");
     if (this.pendingTranscriptions > 0) return this.setPhase("transcribing");
     this.setPhase("listening");
   }
