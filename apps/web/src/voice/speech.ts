@@ -209,12 +209,27 @@ export class VoiceSession {
     this.chunks = [];
     this.pendingTranscriptions += 1;
     this.updatePhase();
+    this.blip();
     recorder.onstop = () => {
       const audio = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
       void this.transcribe(audio);
     };
     recorder.stop();
     this.startRecorder();
+  }
+
+  /** A soft tick the moment an utterance is captured, so Tim hears he was heard. */
+  private blip(): void {
+    const context = this.context;
+    if (context === null) return;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.04, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.12);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.12);
   }
 
   private async transcribe(audio: Blob): Promise<void> {

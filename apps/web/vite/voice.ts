@@ -42,6 +42,22 @@ function readBody(req: Connect.IncomingMessage, limit: number): Promise<Buffer> 
   });
 }
 
+const describe = (error: unknown): string =>
+  error instanceof Error && error.cause !== undefined
+    ? `${error.message}: ${String(error.cause)}`
+    : String(error);
+
+// ElevenLabs drops idle keep-alive sockets; the first request after a pause can hit a dead one.
+async function fetchElevenLabs(path: string, init: RequestInit): Promise<Response> {
+  const attempt = () => fetch(`${API}${path}`, { ...init, signal: AbortSignal.timeout(20_000) });
+  try {
+    return await attempt();
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    return attempt();
+  }
+}
+
 function sendJson(res: import("node:http").ServerResponse, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json");
@@ -54,11 +70,10 @@ async function transcribe(audio: Buffer, contentType: string): Promise<string> {
   form.append("model_id", sttModel());
   form.append("tag_audio_events", "false");
   form.append("file", new Blob([new Uint8Array(audio)], { type: contentType }), "speech.webm");
-  const response = await fetch(`${API}/v1/speech-to-text`, {
+  const response = await fetchElevenLabs("/v1/speech-to-text", {
     method: "POST",
     headers: { "xi-api-key": voiceKey() },
     body: form,
-    signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`speech-to-text answered ${response.status}`);
   const body = (await response.json()) as { text?: unknown };
@@ -72,7 +87,11 @@ export function t3VoicePlugin(): Plugin {
     const route = url.slice(PREFIX.length).split("?")[0];
 
     if (route === "/config" && req.method === "GET") {
-      sendJson(res, 200, { speech: voiceKey() !== "", workspaceRoot });
+      sendJson(res, 200, {
+        speech: voiceKey() !== "",
+        workspaceRoot,
+        model: process.env.T3VOICE_MODEL?.trim() || null,
+      });
       return;
     }
     if (voiceKey() === "") {
@@ -86,7 +105,7 @@ export function t3VoicePlugin(): Plugin {
       readBody(req, MAX_AUDIO_BYTES)
         .then((audio) => transcribe(audio, req.headers["content-type"] ?? "audio/webm"))
         .then((text) => sendJson(res, 200, { text }))
-        .catch((error: unknown) => sendJson(res, 502, { error: String(error) }));
+        .catch((error: unknown) => sendJson(res, 502, { error: describe(error) }));
       return;
     }
 
@@ -95,8 +114,8 @@ export function t3VoicePlugin(): Plugin {
         .then(async (raw) => {
           const { text } = JSON.parse(raw.toString("utf8")) as { text?: unknown };
           if (typeof text !== "string" || text.trim() === "") throw new Error("no text");
-          const response = await fetch(
-            `${API}/v1/text-to-speech/${encodeURIComponent(voiceId())}/stream?output_format=mp3_44100_64`,
+          const response = await fetchElevenLabs(
+            `/v1/text-to-speech/${encodeURIComponent(voiceId())}/stream?output_format=mp3_44100_64`,
             {
               method: "POST",
               headers: { "xi-api-key": voiceKey(), "content-type": "application/json" },
@@ -105,7 +124,6 @@ export function t3VoicePlugin(): Plugin {
                 model_id: ttsModel(),
                 voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: 1.0 },
               }),
-              signal: AbortSignal.timeout(20_000),
             },
           );
           if (!response.ok || response.body === null) {
@@ -119,7 +137,7 @@ export function t3VoicePlugin(): Plugin {
         })
         .catch((error: unknown) => {
           if (res.headersSent) res.end();
-          else sendJson(res, 502, { error: String(error) });
+          else sendJson(res, 502, { error: describe(error) });
         });
       return;
     }
