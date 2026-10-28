@@ -75,6 +75,8 @@ export class RealtimeStt {
   private closed = false;
   /** The current utterance, kept for the batch fallback. */
   private utterance: Int16Array[] = [];
+  /** Interim text of the segment being streamed; used to tell Tim from our own echo. */
+  onPartial: ((text: string) => void) | null = null;
   private unsent: Int16Array[] = [];
 
   /** Opens the socket ahead of time so the first utterance does not wait for it. */
@@ -104,8 +106,8 @@ export class RealtimeStt {
     this.unsent = [];
   }
 
-  /** Ends the utterance and resolves with its transcript. */
-  async commit(): Promise<string> {
+  /** Ends the utterance and resolves with its transcript. `fallback: false` skips the batch retry. */
+  async commit({ fallback = true }: { readonly fallback?: boolean } = {}): Promise<string> {
     const utterance = this.utterance;
     const commit = new Promise<string>((resolve, reject) => {
       this.pending.push({ resolve, reject });
@@ -116,7 +118,7 @@ export class RealtimeStt {
     this.utterance = [];
     if (!sent) {
       this.pending.pop();
-      return transcribeBatch(utterance);
+      return fallback ? transcribeBatch(utterance) : "";
     }
     let timer: number | undefined;
     const timeout = new Promise<never>((_, reject) => {
@@ -125,11 +127,11 @@ export class RealtimeStt {
     try {
       const text = await Promise.race([commit, timeout]);
       // A session that reconnected mid-utterance can commit only silence; the batch has it all.
-      return text === "" ? await transcribeBatch(utterance) : text;
+      return text === "" && fallback ? await transcribeBatch(utterance) : text;
     } catch {
       // A dropped socket or a slow commit: the batch endpoint still has the whole utterance.
       this.socket?.close();
-      return transcribeBatch(utterance);
+      return fallback ? transcribeBatch(utterance) : "";
     } finally {
       window.clearTimeout(timer);
     }
@@ -212,7 +214,9 @@ export class RealtimeStt {
     } catch {
       return;
     }
-    if (message.message_type === "committed_transcript") {
+    if (message.message_type === "partial_transcript") {
+      if (message.text) this.onPartial?.(message.text);
+    } else if (message.message_type === "committed_transcript") {
       this.pending.shift()?.resolve(message.text?.trim() ?? "");
     } else if (message.error !== undefined) {
       this.pending.shift()?.reject(new Error(message.error));
