@@ -14,12 +14,14 @@ import { primaryServerSettingsAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { Button } from "../components/ui/button";
-import brainBrief from "./brain.md?raw";
+import { markBriefed, needsBrief, withBrief } from "./brief";
 import { type VoicePhase, VoiceSession } from "./speech";
+import { takeSentences } from "./speechText";
 import { VoiceExtras } from "./VoiceExtras";
 import { paintVoiceTheme } from "./paintVoiceTheme";
 
 const VOICE_THREAD_TITLE = "voice";
+const HOLD_AFTER_MS = 3_500;
 
 type VoiceConfig = {
   readonly speech: boolean;
@@ -53,7 +55,10 @@ export function VoiceHost() {
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef<VoiceSession | null>(null);
   const sessionStartedAtRef = useRef(0);
-  const spokenRef = useRef(new Set<string>());
+  // Says one short line when a turn has produced no speech for a while, so the loop never goes quiet.
+  const holdTimerRef = useRef<number | null>(null);
+  // How much of each reply has been queued for speech, by turn item id.
+  const spokenRef = useRef(new Map<string, number>());
   // The thread this client just created, until its shell arrives.
   const pendingThreadIdRef = useRef<ThreadId | null>(null);
 
@@ -118,13 +123,15 @@ export function VoiceHost() {
     }
     const threadId = existingThreadId ?? newThreadId();
     if (existingThreadId === null) pendingThreadIdRef.current = threadId;
+    const briefed = existingThreadId === null || needsBrief(threadId, items);
+    const turnText = briefed ? withBrief(text) : text;
     const result =
       existingThreadId !== null || modelSelection === null
         ? await startTurn({
             environmentId,
             input: {
               threadId,
-              message: { ...message, text },
+              message: { ...message, text: turnText },
               runtimeMode: voiceThread?.runtimeMode ?? "full-access",
               interactionMode: voiceThread?.interactionMode ?? "default",
               createdAt,
@@ -134,7 +141,7 @@ export function VoiceHost() {
             environmentId,
             input: {
               threadId,
-              message: { ...message, text: `${brainBrief}\n---\n\nTim says: ${text}` },
+              message: { ...message, text: turnText },
               modelSelection,
               runtimeMode: "full-access",
               interactionMode: "default",
@@ -157,7 +164,14 @@ export function VoiceHost() {
       if (existingThreadId === null) pendingThreadIdRef.current = null;
       const failure = squashAtomCommandFailure(result);
       setError(failure instanceof Error ? failure.message : String(failure));
+      return;
     }
+    if (briefed) markBriefed(threadId);
+    if (holdTimerRef.current !== null) window.clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null;
+      sessionRef.current?.speak("One moment.");
+    }, HOLD_AFTER_MS);
   });
 
   const toggle = useEffectEvent(async () => {
@@ -186,17 +200,24 @@ export function VoiceHost() {
     }
   });
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- speaks each reply the voice thread finishes while the mic is on
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- speaks the voice thread's replies sentence by sentence as they stream while the mic is on
   useEffect(() => {
     const session = sessionRef.current;
     if (session === null) return;
     for (const { item, visibility } of items) {
-      if (item.type !== "assistant_message" || item.streaming || visibility !== "local") continue;
-      if (item.parentItemId !== null || item.completedAt === null) continue;
-      if (spokenRef.current.has(item.id)) continue;
-      if (DateTime.toEpochMillis(item.completedAt) < sessionStartedAtRef.current - 1_000) continue;
-      spokenRef.current.add(item.id);
-      session.speak(item.text);
+      if (item.type !== "assistant_message" || visibility !== "local") continue;
+      if (item.parentItemId !== null) continue;
+      const startedAt = DateTime.toEpochMillis(item.startedAt ?? item.updatedAt);
+      if (startedAt < sessionStartedAtRef.current - 1_000) continue;
+      const queued = spokenRef.current.get(item.id) ?? 0;
+      if (queued >= item.text.length && item.streaming) continue;
+      const { sentences, consumed } = takeSentences(item.text.slice(queued), !item.streaming);
+      spokenRef.current.set(item.id, queued + consumed);
+      if (sentences.length > 0 && holdTimerRef.current !== null) {
+        window.clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = null;
+      }
+      for (const sentence of sentences) session.speak(sentence);
     }
   }, [items]);
 
