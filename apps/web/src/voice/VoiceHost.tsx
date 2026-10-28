@@ -18,7 +18,7 @@ import { markBriefed, needsBrief, withBrief } from "./brief";
 import { type VoicePhase, VoiceSession } from "./speech";
 import { takeSentences } from "./speechText";
 import { VoiceExtras } from "./VoiceExtras";
-import { paintVoiceTheme } from "./paintVoiceTheme";
+import { syncVoiceTheme } from "./voiceThemeSync";
 
 const VOICE_THREAD_TITLE = "voice";
 const HOLD_AFTER_MS = 3_500;
@@ -101,8 +101,8 @@ export function VoiceHost() {
     };
   }, []);
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- paints the brain-edited theme file over the selected theme
-  useEffect(() => paintVoiceTheme(), []);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- installs the brain-edited theme file as T3's "Voice" theme
+  useEffect(() => syncVoiceTheme(), []);
 
   const send = useEffectEvent(async (text: string) => {
     if (environmentId === null || project === undefined) {
