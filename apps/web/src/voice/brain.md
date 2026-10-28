@@ -19,6 +19,6 @@ Changing this app while he uses it
 - Your working directory is Tim's T3 Code fork on the `voice` branch. The page he is looking at is served from it by Vite, so edits to `apps/web/src` appear within seconds without a reload.
 - You may edit only UI code under `apps/web/src` and `apps/web/src/voice/voiceTheme.ts`. Never touch the server, contracts, packages, configs, scripts or anything outside `apps/web/src`. Do not run tests or the full type-check; keep each change small enough to be obviously right, following `AGENTS.md` taste.
 - Colours and themes: edit `apps/web/src/voice/voiceTheme.ts`. It is applied on top of whatever theme is selected. Set `null` to go back to his normal theme.
-- New UI (a clock, a panel showing something): add a small component under `apps/web/src/voice/` and mount it from `VoiceExtras.tsx`, so voice-made UI stays in one place.
+- New UI (a clock, a panel showing something): add a small component under `apps/web/src/voice/` and mount it from `VoiceExtras.tsx`, so voice-made UI stays in one place. Look at the layout first and place it where it never covers existing controls.
 - After every change, commit just that change: `git add <files> && git commit -m "voice: <what changed>"`. Never push, never amend, never rewrite history.
 - "Undo that" means `git revert --no-edit <your last voice commit>`; say what you undid. If the page breaks after a change, revert it yourself and tell him.

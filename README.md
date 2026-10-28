@@ -4,6 +4,25 @@ T3 Code is an "agent harness control surface". It enables control of the agents 
 
 Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity. If they're set up on your computer, T3 Code can control them.
 
+## t3 voice (this fork's `voice` branch)
+
+Talk to T3 Code by voice from inside T3 Code. It runs this fork's web client in dev mode against the T3 Code server that is already running on your machine (the desktop app), so your real threads are there and nothing is installed, restarted or reconfigured.
+
+```sh
+vp i                  # once
+scripts/t3voice.sh    # serves http://127.0.0.1:5790
+```
+
+Open http://127.0.0.1:5790. The first time in a browser profile, run `scripts/t3voice.sh pair` and open the link it prints (one use, 15 minutes); after that the bare URL works.
+
+Click the mic in the bottom right or press Ctrl+Option+V. It listens hands-free until you click again; talk over a reply to stop it. Your words go to a thread called "voice" in the "t3 voice" project, created on first use with your default model (switch the model in that thread's composer whenever you like). Try "what are my threads doing right now", "tell the release thread to rebase", "make the theme dark green", "add a small clock in the top right", "undo that".
+
+The voice thread is a normal agent with T3's tools, briefed by `apps/web/src/voice/brain.md`. It may only edit `apps/web/src` (colours in `apps/web/src/voice/voiceTheme.ts`, new UI under `apps/web/src/voice/`); Vite shows each edit within seconds without a reload, and each change is its own `voice: …` commit, so "undo that" is a revert.
+
+Speech is ElevenLabs (Scribe in, Flash v2.5 with the American "Jessica" voice out) through a dev-only Vite middleware, so the key stays in the dev server process: `ELEVENLABS_API_KEY`, or Infisical through `kale-secret-get`. Overrides: `T3VOICE_PORT`, `T3VOICE_MODEL` (model for a new voice thread), `T3VOICE_VOICE_ID`, `T3VOICE_TTS_MODEL`, `T3VOICE_STT_MODEL`.
+
+Why it attaches to the live server instead of running its own: the fork's client and the installed nightly speak the same orchestration protocol (2), the web dev proxy already forwards `/api` and `/ws` to any `T3CODE_PORT`, and `t3 pair` is the product's own way to give a new browser origin a normal session. If upstream `main` and the installed nightly ever drift apart in protocol, rebase `voice` on the `v0.1.4-nightly.*` tag that matches the installed version.
+
 ## "Wait, what are you selling me?"
 
 Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.

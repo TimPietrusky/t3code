@@ -2,32 +2,31 @@ import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import {
-  T3_CODE_DARK_THEME_COLORS,
-  T3_CODE_LIGHT_THEME_COLORS,
-} from "@t3tools/shared/themePalettes";
 import type { ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { MicIcon, MicOffIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
-import { refreshTheme, syncBrowserChromeTheme } from "~/hooks/useTheme";
 import { newMessageId, newThreadId } from "~/lib/utils";
 import { useProjects, useThreadShells, useThreadVisibleTurnItems } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { primaryServerSettingsAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
-import { applyThemeColorPreview } from "../themePalette";
 import { Button } from "../components/ui/button";
 import brainBrief from "./brain.md?raw";
 import { type VoicePhase, VoiceSession } from "./speech";
 import { VoiceExtras } from "./VoiceExtras";
-import { voiceTheme } from "./voiceTheme";
+import { paintVoiceTheme } from "./paintVoiceTheme";
 
 const VOICE_THREAD_TITLE = "voice";
 
-type VoiceConfig = { readonly speech: boolean; readonly workspaceRoot: string };
+type VoiceConfig = {
+  readonly speech: boolean;
+  readonly workspaceRoot: string;
+  /** T3VOICE_MODEL: a model for new voice threads instead of the default model's. */
+  readonly model: string | null;
+};
 
 const PHASE_LABEL: Record<VoicePhase, string> = {
   off: "",
@@ -98,64 +97,62 @@ export function VoiceHost() {
   }, []);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- paints the brain-edited theme file over the selected theme
-  useEffect(() => {
-    if (voiceTheme === null) return;
-    const base =
-      voiceTheme.appearance === "dark" ? T3_CODE_DARK_THEME_COLORS : T3_CODE_LIGHT_THEME_COLORS;
-    applyThemeColorPreview({ ...base, ...voiceTheme.colors }, voiceTheme.appearance);
-    syncBrowserChromeTheme();
-    return () => refreshTheme();
-  }, []);
+  useEffect(() => paintVoiceTheme(), []);
 
   const send = useEffectEvent(async (text: string) => {
     if (environmentId === null || project === undefined) {
       setError("No t3code project for this checkout yet; start with scripts/t3voice.sh.");
       return;
     }
-    const modelSelection = serverSettings.defaultModelSelection;
-    if (modelSelection === null) {
-      setError("Pick a default model in Settings first.");
-      return;
-    }
+    const defaultSelection = serverSettings.defaultModelSelection;
+    const modelSelection =
+      defaultSelection !== null && config?.model
+        ? { instanceId: defaultSelection.instanceId, model: config.model }
+        : defaultSelection;
     const createdAt = new Date().toISOString();
     const message = { messageId: newMessageId(), role: "user" as const, attachments: [] };
     const existingThreadId = voiceThread?.id ?? pendingThreadIdRef.current;
+    if (existingThreadId === null && modelSelection === null) {
+      setError("Pick a default model in Settings first.");
+      return;
+    }
     const threadId = existingThreadId ?? newThreadId();
     if (existingThreadId === null) pendingThreadIdRef.current = threadId;
-    const result = existingThreadId
-      ? await startTurn({
-          environmentId,
-          input: {
-            threadId: existingThreadId,
-            message: { ...message, text },
-            runtimeMode: voiceThread?.runtimeMode ?? "full-access",
-            interactionMode: voiceThread?.interactionMode ?? "default",
-            createdAt,
-          },
-        })
-      : await startTurn({
-          environmentId,
-          input: {
-            threadId,
-            message: { ...message, text: `${brainBrief}\n---\n\nTim says: ${text}` },
-            modelSelection,
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            bootstrap: {
-              createThread: {
-                projectId: project.id,
-                title: VOICE_THREAD_TITLE,
-                modelSelection,
-                runtimeMode: "full-access",
-                interactionMode: "default",
-                branch: null,
-                worktreePath: null,
-                createdAt,
-              },
+    const result =
+      existingThreadId !== null || modelSelection === null
+        ? await startTurn({
+            environmentId,
+            input: {
+              threadId,
+              message: { ...message, text },
+              runtimeMode: voiceThread?.runtimeMode ?? "full-access",
+              interactionMode: voiceThread?.interactionMode ?? "default",
+              createdAt,
             },
-            createdAt,
-          },
-        });
+          })
+        : await startTurn({
+            environmentId,
+            input: {
+              threadId,
+              message: { ...message, text: `${brainBrief}\n---\n\nTim says: ${text}` },
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              bootstrap: {
+                createThread: {
+                  projectId: project.id,
+                  title: VOICE_THREAD_TITLE,
+                  modelSelection,
+                  runtimeMode: "full-access",
+                  interactionMode: "default",
+                  branch: null,
+                  worktreePath: null,
+                  createdAt,
+                },
+              },
+              createdAt,
+            },
+          });
     if (result._tag === "Failure") {
       if (existingThreadId === null) pendingThreadIdRef.current = null;
       const failure = squashAtomCommandFailure(result);
@@ -172,7 +169,10 @@ export function VoiceHost() {
     }
     setError(null);
     const session = new VoiceSession({
-      onPhase: setPhase,
+      onPhase: (next) => {
+        setPhase(next);
+        if (next === "hearing") setError(null);
+      },
       onUtterance: (text) => void send(text),
       onError: setError,
     });
