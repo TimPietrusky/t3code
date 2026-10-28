@@ -55,7 +55,70 @@ export function takeSentences(
   return { sentences: sentences.filter((sentence) => sentence.trim() !== ""), consumed };
 }
 
-const words = (text: string) => text.toLowerCase().match(/\p{L}[\p{L}'’]*|\d+/gu) ?? [];
+const FILLER = /^(?:[mh]+|u+[hm]*|a+h+|o+h+|e+r+m*|hm+|huh|yeah|yep|yup)$/;
+const WORD = /\p{L}[\p{L}'’]*|\d+/gu;
+const words = (text: string) => text.toLowerCase().match(WORD) ?? [];
+
+// Speech-to-text of our own echo is fuzzy ("octopus's" for "octopuses"): a shared stem counts.
+function spokenMatcher(recentlySpoken: ReadonlyArray<string>): (word: string) => boolean {
+  const spoken = new Set(recentlySpoken.flatMap(words));
+  const stems = new Set(
+    [...spoken].filter((word) => word.length >= 4).map((word) => word.slice(0, 4)),
+  );
+  // A cut-off fragment ("oxy" for "oxygen") counts too.
+  return (word) =>
+    spoken.has(word) ||
+    (word.length >= 4 && stems.has(word.slice(0, 4))) ||
+    (word.length >= 2 && [...spoken].some((said) => said.startsWith(word)));
+}
+
+/** The real words in `heard` that are not part of what we just said. */
+export function foreignWords(
+  heard: string,
+  recentlySpoken: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const isSpoken = spokenMatcher(recentlySpoken);
+  return words(heard).filter((word) => !FILLER.test(word) && !isSpoken(word));
+}
+
+/**
+ * Whether `heard` has a run of words we did not say: Tim talking over the reply. A garbled echo
+ * word comes alone; an interruption ("wait, stop") does not.
+ */
+export function hasForeignRun(
+  heard: string,
+  recentlySpoken: ReadonlyArray<string>,
+  runLength = 2,
+): boolean {
+  const isSpoken = spokenMatcher(recentlySpoken);
+  let run = 0;
+  for (const word of words(heard)) {
+    // Garbled echo often comes back as a filler sound ("mm-hmm", "uh").
+    if (FILLER.test(word)) continue;
+    run = isSpoken(word) ? 0 : run + 1;
+    if (run >= runLength) return true;
+  }
+  return false;
+}
+
+/**
+ * For an utterance that began while a reply was playing: keeps only the span of words that are not
+ * the reply coming back through the mic. Returns "" when nothing of Tim's is left.
+ */
+export function stripEcho(transcript: string, recentlySpoken: ReadonlyArray<string>): string {
+  const isSpoken = spokenMatcher(recentlySpoken);
+  let first = -1;
+  let last = -1;
+  for (const match of transcript.matchAll(WORD)) {
+    const word = match[0].toLowerCase();
+    if (FILLER.test(word) || isSpoken(word)) continue;
+    if (first === -1) first = match.index;
+    last = match.index + match[0].length;
+  }
+  if (first === -1) return "";
+  const end = transcript.slice(last).match(/^[.!?…]*/)?.[0].length ?? 0;
+  return transcript.slice(first, last + end).trim();
+}
 
 /**
  * Whether a transcript is most likely our own reply picked up by the microphone: nearly all of
@@ -63,8 +126,10 @@ const words = (text: string) => text.toLowerCase().match(/\p{L}[\p{L}'’]*|\d+/
  */
 export function isEchoOfSpoken(transcript: string, recentlySpoken: ReadonlyArray<string>): boolean {
   const heard = words(transcript);
-  if (heard.length < 3) return false;
-  const spoken = new Set(recentlySpoken.flatMap(words));
-  const matching = heard.filter((word) => spoken.has(word)).length;
-  return matching / heard.length >= 0.8;
+  return heard.length >= 3 && foreignWords(transcript, recentlySpoken).length / heard.length <= 0.2;
+}
+
+/** Whether a transcript holds any real word, not just filler sounds or punctuation. */
+export function hasRealWords(text: string): boolean {
+  return words(text).some((word) => !FILLER.test(word));
 }
