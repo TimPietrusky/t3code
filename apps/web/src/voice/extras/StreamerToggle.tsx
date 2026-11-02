@@ -8,9 +8,11 @@ export function StreamerToggle() {
       type="button"
       data-t3voice-streamer=""
       aria-pressed={on}
+      aria-label="Streamer mode"
       onClick={() => setStreamer(!on)}
     >
-      {on ? "Streamer on" : "Streamer"}
+      <span aria-hidden />
+      Live
     </button>
   );
 }
