@@ -1,3 +1,4 @@
+import { DayRecap } from "./DayRecap";
 import { VoiceClock } from "./VoiceClock";
 
 /**
@@ -5,5 +6,10 @@ import { VoiceClock } from "./VoiceClock";
  * phone swaps in live (../extras.config.ts), so import only React and files in this folder.
  */
 export function VoiceExtras() {
-  return <VoiceClock />;
+  return (
+    <>
+      <VoiceClock />
+      <DayRecap />
+    </>
+  );
 }
