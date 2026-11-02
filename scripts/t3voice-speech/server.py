@@ -7,8 +7,9 @@ t3 voice dev server (`/__t3voice/local/*`), never directly.
   POST /tts          {"text"} -> raw 16-bit 24 kHz mono PCM, streamed per sentence
   POST /stt          16 kHz mono 16-bit WAV -> {"text"}
   WS   /stt/stream   ElevenLabs Scribe realtime's message shapes: input_audio_chunk in (base64
-                     16 kHz PCM, `commit`), session_started / partial_transcript /
-                     committed_transcript out. Partials re-transcribe the open segment.
+                     16 kHz PCM, `commit`), session_started ({"vad"}) / partial_transcript /
+                     committed_transcript ({"speech_s"}) out. Partials re-transcribe the open
+                     segment. Silero VAD runs first: no speech, no transcript.
 
 Start with scripts/t3voice-speech.sh, which owns the venv and the model cache.
 """
@@ -32,6 +33,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 
 STT_MODEL = os.environ.get("T3VOICE_LOCAL_STT", "mlx-community/parakeet-tdt-0.6b-v2")
+VAD_MODEL = os.environ.get("T3VOICE_LOCAL_VAD", "mlx-community/silero-vad")
 TTS_MODEL = os.environ.get("T3VOICE_LOCAL_TTS", "mlx-community/Kokoro-82M-bf16")
 VOICE = os.environ.get("T3VOICE_LOCAL_VOICE", "af_heart")
 SPEED = float(os.environ.get("T3VOICE_LOCAL_SPEED", "1.0"))
@@ -41,6 +43,17 @@ MAX_SEGMENT_S = 60
 PARTIAL_EVERY_S = 0.25
 MIN_PARTIAL_S = 0.4
 MAX_TTS_CHARS = 1_200
+# Parakeet has no voice detection and turns faint noise into "I'm sorry.", "Yeah.", "Okay." (eval
+# 2 Nov: 36 of them during replies). Silero decides first: no speech, no transcript.
+VAD_THRESHOLD = 0.5
+VAD_FRAME_S = 512 / STT_RATE  # Silero's 32 ms window
+MIN_SPEECH_S = 0.15
+# What Parakeet makes of breath and noise (never a real answer like "yes" or "okay"); dropped when
+# that is all there is and the speech was short.
+NOISE_PHRASES = re.compile(
+    r"^(?:i'?m sorry|sorry|mm+-?hmm+|hmm+|uh+|um+|thank you|thanks|bye|you|oh|ah)$"
+)
+NOISE_PHRASE_MAX_S = 0.7
 
 # One thread runs every model call: MLX work stays ordered and never runs concurrently.
 gpu = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx")
@@ -62,6 +75,12 @@ def load_models() -> None:
     # The published Parakeet weights are fp32 (2.3 GB); bf16 halves that with the same transcripts.
     models["stt"].set_dtype(mx.bfloat16)
     models["tts"] = load_tts(TTS_MODEL)
+    try:
+        from mlx_audio.vad import load as load_vad
+
+        models["vad"] = load_vad(VAD_MODEL)
+    except Exception as error:  # noqa: BLE001 - without it, transcripts are just ungated
+        log(f"no voice detection ({VAD_MODEL}): {error}")
     # First calls load the phonemizer and compile kernels (~1.5 s); pay that before anyone waits.
     # Real speech, so the transcriber's decoder runs too: silence never reaches it.
     spoken = b"".join(synthesize("Ready when you are. What should we work on first?"))
@@ -71,14 +90,41 @@ def load_models() -> None:
     log(f"models ready in {time.time() - started:.1f}s ({STT_MODEL}, {TTS_MODEL} {VOICE})")
 
 
-def transcribe_pcm(samples: np.ndarray) -> str:
+def speech_frames(samples: np.ndarray) -> np.ndarray | None:
+    """Silero's speech probability per 32 ms frame; None without the model."""
+    vad = models.get("vad")
+    if vad is None:
+        return None
+    return np.array(vad.predict_proba(samples, sample_rate=STT_RATE)).reshape(-1) > VAD_THRESHOLD
+
+
+def transcribe_pcm(samples: np.ndarray) -> tuple[str, float | None]:
+    """Text and seconds of speech Silero found (None without it). Only speech gets a transcript."""
     if samples.size < STT_RATE // 10:
-        return ""
+        return "", 0.0
+    speech = speech_frames(samples)
+    speech_s = None if speech is None else float(speech.sum()) * VAD_FRAME_S
+    if speech_s is not None and speech_s < MIN_SPEECH_S:
+        return "", speech_s
     try:
         result = models["stt"].generate(mx.array(samples))
-        return result.text.strip()
     finally:
         mx.clear_cache()
+    text = result.text.strip()
+    if speech is not None and result.sentences:
+        # Only sentences that overlap speech (a word made up from the noise around it goes).
+        kept = [
+            sentence.text.strip()
+            for sentence in result.sentences
+            if speech[
+                max(0, int((sentence.start - 0.1) / VAD_FRAME_S)) : int((sentence.end + 0.1) / VAD_FRAME_S) + 1
+            ].any()
+        ]
+        text = " ".join(part for part in kept if part)
+    bare = re.sub(r"[^\w' -]", "", text.lower()).strip()
+    if speech_s is not None and speech_s < NOISE_PHRASE_MAX_S and NOISE_PHRASES.match(bare):
+        return "", speech_s
+    return text, speech_s
 
 
 def synthesize(text: str):
@@ -165,8 +211,10 @@ async def stt(request: Request):
             pcm = wav.readframes(wav.getnframes())
     except (wave.Error, EOFError):
         return JSONResponse({"error": "not a wav file"}, status_code=400)
-    text = await asyncio.get_running_loop().run_in_executor(gpu, transcribe_pcm, pcm16_to_float(pcm))
-    return {"text": text}
+    text, speech_s = await asyncio.get_running_loop().run_in_executor(
+        gpu, transcribe_pcm, pcm16_to_float(pcm)
+    )
+    return {"text": text, "speech_s": speech_s}
 
 
 @app.websocket("/stt/stream")
@@ -184,12 +232,13 @@ async def stt_stream(socket: WebSocket):
     generation = 0
 
     async def send_partial(audio: np.ndarray, of_generation: int) -> None:
-        text = await loop.run_in_executor(gpu, transcribe_pcm, audio)
+        text, _speech_s = await loop.run_in_executor(gpu, transcribe_pcm, audio)
         # A partial that finishes after its segment was committed would mislabel the next one.
         if text and of_generation == generation:
             await socket.send_json({"message_type": "partial_transcript", "text": text})
 
-    await socket.send_json({"message_type": "session_started"})
+    # `vad`: transcripts come only from speech Silero found (the client lets them cut a reply).
+    await socket.send_json({"message_type": "session_started", "vad": "vad" in models})
     try:
         while True:
             message = json.loads(await socket.receive_text())
@@ -205,8 +254,10 @@ async def stt_stream(socket: WebSocket):
                 audio = np.concatenate(segment) if segment else np.zeros(0, np.float32)
                 segment, samples, since_partial = [], 0, 0
                 generation += 1
-                text = await loop.run_in_executor(gpu, transcribe_pcm, audio)
-                await socket.send_json({"message_type": "committed_transcript", "text": text})
+                text, speech_s = await loop.run_in_executor(gpu, transcribe_pcm, audio)
+                await socket.send_json(
+                    {"message_type": "committed_transcript", "text": text, "speech_s": speech_s}
+                )
             elif (
                 since_partial >= PARTIAL_EVERY_S * STT_RATE
                 and samples >= MIN_PARTIAL_S * STT_RATE
