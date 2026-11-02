@@ -195,6 +195,7 @@ import {
 } from "./ComposerCommandMenu";
 import {
   ComposerAttachButton,
+  ComposerAttachInput,
   ComposerAttachmentFileList,
   ComposerAttachmentMediaRow,
   ComposerFilePreviewDialog,
@@ -1055,6 +1056,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const pasteAsTextShortcutUntilRef = useRef(0);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
+  const composerAttachInputRef = useRef<HTMLInputElement>(null);
   const providerInputRejectedRef = useRef(false);
   const composerSelectLockRef = useRef(false);
   const composerMenuOpenRef = useRef(false);
@@ -3133,10 +3135,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       />
     ) : null;
   const composerAttachButton = showComposerAttachAction ? (
-    <ComposerAttachButton
-      addComposerAttachments={addComposerAttachments}
-      focusComposer={focusComposer}
-    />
+    <ComposerAttachButton onOpenPicker={() => composerAttachInputRef.current?.click()} />
   ) : null;
   return (
     <form
@@ -3475,6 +3474,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               message={providerInputSubmissionError ?? composerSubmissionError}
             />
 
+            {showComposerAttachAction ? (
+              <ComposerAttachInput
+                ref={composerAttachInputRef}
+                addComposerAttachments={addComposerAttachments}
+                focusComposer={focusComposer}
+              />
+            ) : null}
             {isComposerCollapsedMobile ? null : (
               <div
                 data-chat-composer-footer="true"

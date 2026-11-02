@@ -1,10 +1,10 @@
 import { createMemoryHistory } from "@tanstack/react-router";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type * as Context from "effect/Context";
 import { expect, it, vi } from "vite-plus/test";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { AppRoot } from "~/AppRoot";
 // The route loads ChatView lazily, and its first transform (React Compiler over ~4k lines)
@@ -17,6 +17,7 @@ import {
   ENVIRONMENT_ID,
   PROJECT_ID,
   installFakeEnvironment,
+  threadWithHistory,
   type FakeDriver,
 } from "../../test/fakeEnvironment";
 import { render } from "../../test/render";
@@ -64,4 +65,52 @@ it("a new draft does not load its reserved thread before the server lists it", a
     .filter((url) => url.includes(`/api/orchestration/threads/${threadId}/`));
   // A 404 here marks the thread deleted, and the view never loads it once the send creates it.
   expect(threadRequests).toEqual([]);
+});
+
+it("a file picked while the mobile composer collapses still attaches", async () => {
+  const viewport = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(390, 844);
+  await using _viewport = {
+    [Symbol.asyncDispose]: () => page.viewport(viewport.width, viewport.height),
+  };
+  const thread = threadWithHistory("attach-picker", 1);
+  using _environment = installFakeEnvironment([thread]);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    onboardingCompletedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const router = getRouter(
+    createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${thread.id}`] }),
+  );
+  await router.load();
+  await using _app = await render(<AppRoot router={router} />, {
+    // AppRoot brings its own router.
+    router: false,
+  });
+
+  await expect.element(page.getByTestId("composer-editor")).toHaveFocus();
+  let pickerInput: HTMLInputElement | null = null;
+  using _picker = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function (
+    this: HTMLInputElement,
+  ) {
+    pickerInput = this;
+  });
+  await userEvent.click(page.getByRole("button", { name: "Attach files" }));
+  // iOS dismisses the keyboard while its photo picker is open, blurring the editor.
+  (document.activeElement as HTMLElement | null)?.blur();
+  await expect.element(page.getByRole("button", { name: "Expand composer" })).toBeVisible();
+
+  const input = pickerInput as HTMLInputElement | null;
+  if (!input) throw new Error("the attach button did not open a file picker");
+  const transfer = new DataTransfer();
+  transfer.items.add(new File(["notes"], "notes.txt", { type: "text/plain" }));
+  input.files = transfer.files;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+
+  await vi.waitFor(() => {
+    const draft = useComposerDraftStore
+      .getState()
+      .getComposerDraft(scopeThreadRef(ENVIRONMENT_ID, thread.id));
+    expect(draft?.files.map((file) => file.name)).toEqual(["notes.txt"]);
+  });
 });
