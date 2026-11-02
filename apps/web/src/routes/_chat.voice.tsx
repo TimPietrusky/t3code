@@ -1,12 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { VoicePage } from "../voice/VoicePage";
-
-function VoiceRouteView() {
-  const { authGateState } = Route.useRouteContext();
-  return <VoicePage authenticated={authGateState.status === "authenticated"} />;
-}
+import { setVoiceOpen } from "../voice/voiceOpen";
 
 export const Route = createFileRoute("/_chat/voice")({
-  component: VoiceRouteView,
+  component: VoicePage,
+  onEnter: () => setVoiceOpen(true),
 });

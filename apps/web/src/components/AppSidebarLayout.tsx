@@ -64,8 +64,13 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
 import { resolveThreadRouteRef } from "../threadRoutes";
+import { VoiceToggleButton } from "../voice/VoiceToggleButton";
+import { voiceEnabled } from "../voice/voiceOpen";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
+// Titlebar content starts after the sidebar trigger and the voice toggle beside it.
+const VOICE_TITLEBAR_CONTENT_LEFT =
+  "calc(var(--workspace-controls-left) + 2 * var(--workspace-titlebar-control-size) + 0.25rem + var(--workspace-titlebar-control-gap))";
 
 function subscribeToViewportWidth(onChange: () => void): () => void {
   window.addEventListener("resize", onChange);
@@ -375,7 +380,7 @@ function SidebarControl() {
     <div
       ref={appShellCommandsRef}
       className={cn(
-        "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center",
+        "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center gap-1",
         isMobile && mobileSheetMounted && "hidden",
       )}
       data-sidebar-control=""
@@ -397,6 +402,7 @@ function SidebarControl() {
           Toggle main sidebar{shortcutLabel ? ` (${shortcutLabel})` : ""}
         </TooltipPopup>
       </Tooltip>
+      <VoiceToggleButton onBackdrop={Boolean(isSidebarVisible && stageBackdropVariant)} />
     </div>
   );
 }
@@ -440,6 +446,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     "--sidebar-width": `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,
     "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
     ...windowControlsInsetStyle,
+    ...(voiceEnabled ? { "--workspace-titlebar-content-left": VOICE_TITLEBAR_CONTENT_LEFT } : {}),
   } as CSSProperties;
 
   return (

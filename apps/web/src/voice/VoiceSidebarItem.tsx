@@ -3,14 +3,14 @@ import { MicIcon } from "lucide-react";
 
 import { SidebarMenuButton, SidebarMenuItem, useSidebar } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
+import { voiceEnabled } from "./voiceOpen";
 
-/** Opens the voice page from the sidebar footer, next to Settings and Usage. */
+/** Opens the voice page (voice-made UI and the bar) from the sidebar footer. */
 export function VoiceSidebarItem() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const active = useLocation({ select: (location) => location.pathname === "/voice" });
-  // Inline, not VoicePage's constant: importing the page would pull the whole call into the sidebar.
-  if (!(import.meta.env.DEV || import.meta.env.VITE_T3VOICE === "1")) return null;
+  if (!voiceEnabled) return null;
   return (
     <SidebarMenuItem className="shrink-0">
       <Tooltip>

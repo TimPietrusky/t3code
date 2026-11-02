@@ -9,6 +9,8 @@ import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoute
 import { retainThreadFindForRoute } from "../components/chat/threadFindStore";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
+import { VoiceDock } from "../voice/VoiceDock";
+import { voiceEnabled } from "../voice/voiceOpen";
 
 function threadRouteTargetKey(target: ThreadRouteTarget | null) {
   if (!target) return null;
@@ -28,6 +30,9 @@ function ChatRouteLayout() {
     setBackgroundTarget(threadTarget);
   }
   const shownTarget = modalOpen ? backgroundTarget : threadTarget;
+  const authenticated = Route.useRouteContext({
+    select: (context) => context.authGateState.status === "authenticated",
+  });
   return (
     <>
       {shownTarget?.kind === "server" && !modalOpen ? (
@@ -41,6 +46,7 @@ function ChatRouteLayout() {
         <Outlet />
       )}
       {modalOpen ? <Outlet /> : null}
+      {voiceEnabled && authenticated ? <VoiceDock /> : null}
     </>
   );
 }
