@@ -540,7 +540,8 @@ export class VoiceSession {
     const partial = this.partial;
     const startedAt = this.utteranceStartedAt;
     this.pendingTranscriptions += 1;
-    this.blip();
+    // Noise that opened the gate has no words yet; a tick for it would sound like being heard.
+    if (hasRealWords(partial)) this.blip();
     this.updatePhase();
     void this.stt
       .commit()
