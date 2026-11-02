@@ -101,32 +101,61 @@ export function hasForeignRun(
   return false;
 }
 
+// Our own reply coming back through a speaker repeats it word for word: a run of this many of its
+// words in order. Tim's short answer reusing a word or two of the question ("keep it?" → "yeah,
+// keep it") is never echo (2 Nov: three of his answers were dropped as echo, on headphones).
+const ECHO_RUN = 4;
+
+function spokenRuns(recentlySpoken: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> {
+  return recentlySpoken.map((sentence) => words(sentence).filter((word) => !FILLER.test(word)));
+}
+
+/** Indexes (into `heard`) of words that sit in a run of ECHO_RUN or more of a spoken sentence. */
+function echoedWordIndexes(heard: ReadonlyArray<string>, recentlySpoken: ReadonlyArray<string>) {
+  const echoed = new Set<number>();
+  for (const said of spokenRuns(recentlySpoken)) {
+    for (let i = 0; i < heard.length; i += 1) {
+      for (let j = 0; j < said.length; j += 1) {
+        let n = 0;
+        while (i + n < heard.length && j + n < said.length && heard[i + n] === said[j + n]) n += 1;
+        if (n >= ECHO_RUN) for (let k = 0; k < n; k += 1) echoed.add(i + k);
+      }
+    }
+  }
+  return echoed;
+}
+
 /**
- * For an utterance that began while a reply was playing: keeps only the span of words that are not
- * the reply coming back through the mic. Returns "" when nothing of Tim's is left.
+ * For an utterance that began while a reply was playing: drops the reply's words coming back
+ * (runs of ECHO_RUN or more, word for word) and keeps everything else Tim said.
  */
 export function stripEcho(transcript: string, recentlySpoken: ReadonlyArray<string>): string {
-  const isSpoken = spokenMatcher(recentlySpoken);
-  let first = -1;
-  let last = -1;
-  for (const match of transcript.matchAll(WORD)) {
-    const word = match[0].toLowerCase();
-    if (FILLER.test(word) || isSpoken(word)) continue;
-    if (first === -1) first = match.index;
-    last = match.index + match[0].length;
-  }
-  if (first === -1) return "";
+  const matches = [...transcript.matchAll(WORD)].filter(
+    (match) => !FILLER.test(match[0].toLowerCase()),
+  );
+  const echoed = echoedWordIndexes(
+    matches.map((match) => match[0].toLowerCase()),
+    recentlySpoken,
+  );
+  if (echoed.size === 0) return transcript.trim();
+  const kept = matches.filter((_, index) => !echoed.has(index));
+  if (kept.length === 0) return "";
+  const first = kept[0]!.index;
+  const lastMatch = kept.at(-1)!;
+  const last = lastMatch.index + lastMatch[0].length;
   const end = transcript.slice(last).match(/^[.!?…]*/)?.[0].length ?? 0;
   return transcript.slice(first, last + end).trim();
 }
 
 /**
- * Whether a transcript is most likely our own reply picked up by the microphone: nearly all of
- * its words appear in what was just spoken. Real interruptions ("wait, stop") rarely do.
+ * Whether a transcript is most likely our own reply picked up by the microphone: it repeats the
+ * reply word for word (a run of ECHO_RUN) and nearly all of its words are the reply's.
  */
 export function isEchoOfSpoken(transcript: string, recentlySpoken: ReadonlyArray<string>): boolean {
-  const heard = words(transcript);
-  return heard.length >= 3 && foreignWords(transcript, recentlySpoken).length / heard.length <= 0.2;
+  const heard = words(transcript).filter((word) => !FILLER.test(word));
+  if (heard.length < ECHO_RUN) return false;
+  const echoed = echoedWordIndexes(heard, recentlySpoken);
+  return echoed.size / heard.length >= 0.8;
 }
 
 // What local speech-to-text makes of breath and noise (2 Nov eval: "I'm sorry." 22 times in one walk).

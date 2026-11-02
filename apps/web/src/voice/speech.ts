@@ -369,6 +369,12 @@ export class VoiceSession {
       this.stt.push(pcm);
       this.probeMs += FRAME_MS;
       if (decision?.opened && decision.by === "speak") this.closeVoiceAt = now;
+      // The reply ended while Tim is talking (he answers the moment the question ends): the segment
+      // is his turn, not a probe (2 Nov: his "keep it" vanished three times between reply and turn).
+      if (!replyAudible && (this.gate.open || this.gate.voiced)) {
+        this.probeToTurn();
+        return;
+      }
       // A segment never ends while someone talks close: Tim's interruption stays in one transcript.
       if (
         !replyAudible ||
@@ -389,7 +395,10 @@ export class VoiceSession {
       // voice detection turns breath and noise into "I'm sorry." (2 Nov: Tim's replies cut off).
       if (replyAudible) {
         if ((this.gate.voiced || this.gate.open) && this.stt.speechOnly) this.beginProbe();
-      } else if (decision?.opened) this.beginSpeech(false);
+      } else if (decision?.opened || this.gate.open) {
+        // Opened now, or already open from the reply's last moments: either way Tim is talking.
+        this.beginSpeech(false);
+      }
       return;
     }
 
@@ -422,6 +431,19 @@ export class VoiceSession {
     this.stt.discard();
     for (const frame of this.preRoll) this.stt.push(frame);
     this.preRoll = [];
+  }
+
+  private probeToTurn(): void {
+    voiceLog("voice", "probe.to-turn", { ms: this.probeMs });
+    this.probing = false;
+    this.inSpeech = true;
+    this.startedDuringReply = false;
+    this.utteranceStartedAt = performance.now() - this.probeMs;
+    this.speechMs = this.probeMs;
+    this.closedMs = 0;
+    this.partial = "";
+    this.partials = 0;
+    this.updatePhase();
   }
 
   private closeVoiceRecently(): boolean {
@@ -515,14 +537,20 @@ export class VoiceSession {
     const startedDuringReply = this.startedDuringReply;
     const speechMs = this.speechMs - this.closedMs;
     const partials = this.partials;
+    const partial = this.partial;
     const startedAt = this.utteranceStartedAt;
     this.pendingTranscriptions += 1;
     this.blip();
     this.updatePhase();
     void this.stt
       .commit()
-      .then((text) => {
+      .then((committed) => {
         const spoken = this.player?.recentlySpoken() ?? [];
+        // The final transcript came back empty though the partials had words: they were heard
+        // (2 Nov: Tim's answer to "how much per day?" showed "Yeah, yeah." and then vanished).
+        const fromPartial = committed.trim() === "" && hasRealWords(partial);
+        if (fromPartial) voiceLog("tim", "transcript.from-partial", { partial });
+        const text = fromPartial ? partial : committed;
         this.deliver(startedDuringReply ? stripEcho(text, spoken) : text, spoken, {
           speechMs,
           partials,
@@ -559,7 +587,7 @@ export class VoiceSession {
       ? "no real words"
       : this.engine === "local" && isNoisePhrase(heard)
         ? "a phrase made up from noise"
-        : isEchoOfSpoken(heard, spoken)
+        : info.duringReply && isEchoOfSpoken(heard, spoken)
           ? "our own words coming back"
           : words.length === 1 && info.speechMs < MIN_LONE_WORD_MS
             ? "a lone word from a short noise"
