@@ -62,11 +62,16 @@
 [data-t3voice-ticket-counts] {
   opacity: 0.8;
 }
-[data-t3voice-tickets] li button {
+[data-t3voice-tickets] li {
   display: grid;
-  grid-template-columns: 2.4em 1fr auto;
-  align-items: baseline;
+  grid-template-columns: 1fr auto;
+  align-items: start;
   gap: 0 6px;
+}
+[data-t3voice-tickets] li > button {
+  display: grid;
+  grid-template-columns: 2.4em 1fr;
+  align-items: baseline;
   width: 100%;
   padding: 2px 0;
   border: 0;
@@ -76,35 +81,56 @@
   text-align: left;
   cursor: pointer;
 }
-[data-t3voice-tickets] li button[aria-expanded="true"] {
+[data-t3voice-tickets] li > button[aria-expanded="true"] {
   background: rgba(61, 255, 143, 0.06);
 }
 [data-t3voice-tickets] li b {
   color: #3dff8f;
   font-variant-numeric: tabular-nums;
 }
-[data-t3voice-tickets] li span {
+[data-t3voice-tickets] li > button > span {
   display: grid;
 }
-[data-t3voice-tickets] li i {
-  padding: 0 5px;
+[data-t3voice-ticket-actions] {
+  display: flex;
+  gap: 4px;
+  padding-top: 2px;
+}
+[data-t3voice-ticket-actions] button,
+[data-t3voice-ticket-undo] {
+  padding: 3px 7px;
   border: 1px solid currentColor;
+  background: none;
+  font: inherit;
   font-size: 9px;
-  font-style: normal;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  cursor: pointer;
 }
-[data-t3voice-tickets] i[data-rec="close"] {
-  color: #e07a6e;
-}
-[data-t3voice-tickets] i[data-rec="keep"] {
+[data-t3voice-ticket-actions] button[data-decision="keep"] {
   color: #3dff8f;
 }
-[data-t3voice-tickets] i[data-rec="ask"] {
+[data-t3voice-ticket-actions] button[data-decision="close"] {
+  color: #e07a6e;
+}
+/* The recommended choice is filled. */
+[data-t3voice-ticket-actions] button[data-recommended][data-decision="keep"] {
+  color: #0b0f0d;
+  background: #3dff8f;
+  border-color: #3dff8f;
+}
+[data-t3voice-ticket-actions] button[data-recommended][data-decision="close"] {
+  color: #0b0f0d;
+  background: #e07a6e;
+  border-color: #e07a6e;
+}
+[data-t3voice-ticket-undo] {
+  padding: 0 5px;
   color: #ffc24d;
 }
 [data-t3voice-ticket-detail] {
+  display: grid;
   gap: 3px;
   margin: 4px 0 2px;
   padding-left: 6px;
