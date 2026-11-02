@@ -14,7 +14,10 @@ const SCHEDULE_AHEAD_S = 0.03;
 // A piece that ends this much before its scheduled end was cut short (not by us).
 const EARLY_END_S = 0.06;
 // Give up on a context that will not run again after this long (then the reply ends, logged).
+// Counted only while the page is visible: a reply cut by the phone going to the background waits.
 const STALLED_GIVE_UP_MS = 20_000;
+// A stall longer than this replays the cut sentence from its start (Tim lost its beginning).
+const RESTART_SENTENCE_AFTER_MS = 1_500;
 const RESUME_RETRY_MS = 400;
 
 type PlaybackEndCause = "finished" | "barge" | "ctx-interrupted" | "error" | string;
@@ -22,6 +25,9 @@ type PlaybackEndCause = "finished" | "barge" | "ctx-interrupted" | "error" | str
 type ScheduledPiece = {
   readonly source: AudioBufferSourceNode;
   readonly samples: Float32Array<ArrayBuffer>;
+  /** The sentence and chunk this piece plays, to replay a cut sentence from its start. */
+  readonly sentence: QueuedSentence;
+  readonly index: number;
   readonly startAt: number;
   readonly endAt: number;
 };
@@ -95,15 +101,18 @@ export class SpeechPlayer {
       visibility: document.visibilityState,
     });
     if (state === "running") {
+      const stalledMs = this.stalledSince === null ? 0 : performance.now() - this.stalledSince;
       if (this.stalledSince !== null) {
         voiceLog("voice", "playback.resumed", {
-          afterMs: Math.round(performance.now() - this.stalledSince),
+          afterMs: Math.round(stalledMs),
           current: this.current,
         });
       }
       this.stalledSince = null;
-      // Anything cut short while the context was down plays again from where it stopped.
-      this.recover("resumed");
+      // Back after a while (the phone was in the background): the cut sentence again from its
+      // start, then the rest of the reply. A short glitch goes on from where it stopped.
+      if (stalledMs >= RESTART_SENTENCE_AFTER_MS) this.recover("back after a stall", true);
+      else this.recover("resumed");
       return;
     }
     if (state === "closed" || !this.running) return;
@@ -319,7 +328,7 @@ export class SpeechPlayer {
               waitMs: Math.round(performance.now() - sentence.queuedAt),
             });
           }
-          this.schedule(sentence.chunks[played]!);
+          this.schedule(sentence.chunks[played]!, sentence, played);
           if (heard !== null) heard.until = this.endsAt;
           played += 1;
           continue;
@@ -350,6 +359,7 @@ export class SpeechPlayer {
 
   /** Waits until every scheduled piece has played; "ctx-interrupted" if the context never came back. */
   private async played(generation: number): Promise<PlaybackEndCause> {
+    let giveUpAt: number | null = null;
     for (;;) {
       if (generation !== this.generation) return "stopped";
       const running = (this.context.state as string) === "running";
@@ -359,11 +369,15 @@ export class SpeechPlayer {
         return "finished";
       }
       if (!running && this.stalledSince !== null) {
-        if (performance.now() - this.stalledSince > STALLED_GIVE_UP_MS) {
-          this.silence();
-          return "ctx-interrupted";
+        if (document.visibilityState === "hidden") giveUpAt = null;
+        else {
+          giveUpAt ??= performance.now() + STALLED_GIVE_UP_MS;
+          if (performance.now() > giveUpAt) {
+            this.silence();
+            return "ctx-interrupted";
+          }
         }
-      }
+      } else giveUpAt = null;
       await new Promise<void>((resolve) => {
         this.settled = resolve;
         const left = running ? (this.playhead - this.context.currentTime) * 1000 : 250;
@@ -375,13 +389,14 @@ export class SpeechPlayer {
 
   /**
    * Puts back whatever an interruption cut short: every piece not yet fully played is stopped and
-   * scheduled again from where it stopped, in order, from now.
+   * scheduled again, in order, from now: from where it stopped, or with `fromSentenceStart` from
+   * the start of the sentence it was in (after a long stall Tim has lost its beginning).
    */
-  private recover(why: string): void {
+  private recover(why: string, fromSentenceStart = false): void {
     if ((this.context.state as string) !== "running" || this.pieces.size === 0) return;
     const now = this.context.currentTime;
     const cut = [...this.pieces].filter((piece) => piece.source.onended === null);
-    if (cut.length === 0) return;
+    if (cut.length === 0 && !fromSentenceStart) return;
     const pending = [...this.pieces].sort((a, b) => a.startAt - b.startAt);
     for (const piece of pending) {
       piece.source.onended = null;
@@ -394,23 +409,42 @@ export class SpeechPlayer {
     this.pieces.clear();
     this.playhead = 0;
     let replayedS = 0;
+    const first = pending[0]!;
+    if (fromSentenceStart) {
+      for (let index = 0; index < first.index; index += 1) {
+        const chunk = first.sentence.chunks[index]!;
+        replayedS += chunk.length / TTS_SAMPLE_RATE;
+        this.schedule(chunk, first.sentence, index);
+      }
+    }
     for (const piece of pending) {
-      const playedS = Math.max(0, now - piece.startAt);
-      const from = Math.min(piece.samples.length, Math.floor(playedS * TTS_SAMPLE_RATE));
-      if (piece.samples.length - from < 240) continue;
-      const rest = piece.samples.slice(from);
+      const full = piece.sentence.chunks[piece.index] ?? piece.samples;
+      const playedS = fromSentenceStart ? 0 : Math.max(0, now - piece.startAt);
+      const samples = fromSentenceStart ? full : piece.samples;
+      const from = Math.min(samples.length, Math.floor(playedS * TTS_SAMPLE_RATE));
+      if (samples.length - from < 240) continue;
+      const rest = from === 0 ? samples : samples.slice(from);
       replayedS += rest.length / TTS_SAMPLE_RATE;
-      this.schedule(rest);
+      this.schedule(rest, piece.sentence, piece.index);
+    }
+    if (fromSentenceStart) {
+      this.current = first.sentence.text;
+      this.recent.push({ text: first.sentence.text, until: this.endsAt });
     }
     voiceLog("voice", "playback.replayed", {
       why,
+      from: fromSentenceStart ? "sentence start" : "where it stopped",
       pieces: pending.length,
       seconds: Math.round(replayedS * 100) / 100,
       current: this.current,
     });
   }
 
-  private schedule(samples: Float32Array<ArrayBuffer>): void {
+  private schedule(
+    samples: Float32Array<ArrayBuffer>,
+    sentence: QueuedSentence,
+    index: number,
+  ): void {
     const buffer = this.context.createBuffer(1, samples.length, TTS_SAMPLE_RATE);
     buffer.copyToChannel(samples, 0);
     const source = this.context.createBufferSource();
@@ -420,6 +454,8 @@ export class SpeechPlayer {
     const piece: ScheduledPiece = {
       source,
       samples,
+      sentence,
+      index,
       startAt,
       endAt: startAt + buffer.duration,
     };
