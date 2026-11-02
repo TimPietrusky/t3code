@@ -102,6 +102,11 @@ export class RealtimeStt {
   /** Interim text of the segment being streamed; used to tell Tim from our own echo. */
   onPartial: ((text: string) => void) | null = null;
   private unsent: Int16Array[] = [];
+  /**
+   * Text the service committed by itself (Scribe does after ~1 s of silence, even with manual
+   * commits) before ours: the start of the same utterance, so it leads its partials and its result.
+   */
+  private carry: string[] = [];
 
   /**
    * Opens the socket ahead of time so the first utterance does not wait for it. Called as each
@@ -141,6 +146,7 @@ export class RealtimeStt {
   discard(): void {
     this.utterance = [];
     this.unsent = [];
+    this.carry = [];
   }
 
   /** Ends the utterance and resolves with its transcript. `fallback: false` skips the batch retry. */
@@ -247,9 +253,16 @@ export class RealtimeStt {
       return;
     }
     if (message.message_type === "partial_transcript") {
-      if (message.text) this.onPartial?.(message.text);
+      if (message.text) this.onPartial?.([...this.carry, message.text].join(" "));
     } else if (message.message_type === "committed_transcript") {
-      this.pending.shift()?.resolve(message.text?.trim() ?? "");
+      const text = message.text?.trim() ?? "";
+      const commit = this.pending.shift();
+      if (commit === undefined) {
+        if (text !== "") this.carry.push(text);
+        return;
+      }
+      commit.resolve([...this.carry, text].filter(Boolean).join(" "));
+      this.carry = [];
     } else if (message.error !== undefined) {
       this.pending.shift()?.reject(new Error(message.error));
     }

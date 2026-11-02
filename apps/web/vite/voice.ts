@@ -5,6 +5,8 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeNet from "node:net";
 import type { Connect, Plugin } from "vite-plus";
 
+import { appendSessionEvents } from "./sessionLog";
+
 /**
  * Dev-only speech endpoints for t3 voice: the browser only talks to `/__t3voice/*` on its own origin.
  * `engine=elevenlabs` keeps the key in this process (`scripts/t3voice.sh`); `engine=local` and
@@ -157,6 +159,17 @@ export function t3VoicePlugin(): Plugin {
     const route = url.slice(PREFIX.length).split("?")[0];
 
     const engine = new URLSearchParams(url.split("?")[1] ?? "").get("engine");
+
+    // The page's session events (voiceLog.ts): one JSON line each, never audio.
+    if (route === "/log" && req.method === "POST") {
+      readBody(req, 512 * 1024)
+        .then((raw) => {
+          const written = appendSessionEvents(JSON.parse(raw.toString("utf8")));
+          sendJson(res, 200, { written });
+        })
+        .catch(() => sendJson(res, 400, { error: "bad log batch" }));
+      return;
+    }
 
     if (route === "/config" && req.method === "GET") {
       sendJson(res, 200, {

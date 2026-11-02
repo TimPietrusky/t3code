@@ -31,6 +31,7 @@
         "t3voice-phone.mjs",
         "t3voice-phone-build.mjs",
         "t3voice-presence-sync.mjs",
+        "t3voice-log.mjs",
         "knip-schemas.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",

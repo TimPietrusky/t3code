@@ -1,10 +1,11 @@
 /**
- * Hands-free speech for t3 voice: open mic, energy voice detection, realtime speech-to-text, and
- * replies spoken sentence by sentence. Barge-in only fires when the mic is clearly louder than the
- * echo of what is playing, and transcripts of our own words are dropped (laptop speakers).
+ * Hands-free speech for t3 voice: open mic, Presence's close-talk gate, realtime speech-to-text and
+ * replies spoken sentence by sentence. Only Tim talking close to the mic starts a turn or cuts a reply
+ * (presence/closetalk.js); a reply stops only when the gate hears him and the transcript has his words.
  */
 import { type SpeechEngine, speechEngine } from "./engine";
 import { SpeechPlayer } from "./player";
+import { type CloseTalkMode, createCloseTalk } from "./presence/closetalk";
 import { RealtimeStt, STT_SAMPLE_RATE } from "./realtimeStt";
 import {
   foreignWords,
@@ -14,6 +15,7 @@ import {
   speakableText,
   stripEcho,
 } from "./speechText";
+import { voiceLog } from "./voiceLog";
 
 export type VoicePhase = "off" | "listening" | "hearing" | "transcribing" | "speaking";
 
@@ -21,29 +23,59 @@ export type VoiceSessionEvents = {
   readonly onPhase: (phase: VoicePhase) => void;
   readonly onUtterance: (text: string) => void;
   readonly onError: (message: string) => void;
+  /** A reply was cut off (barge-in): the bar shows Presence's stopped look. */
+  readonly onStopped?: (reason: string) => void;
 };
 
 const FRAME_MS = 20;
 const FRAME_SAMPLES = (STT_SAMPLE_RATE * FRAME_MS) / 1000;
 const PRE_ROLL_FRAMES = 15;
-const SPEECH_START_MS = 120;
-const BARGE_IN_MS = 240;
-const SPEECH_END_MS = 1_200;
-const MIN_SPEECH_MS = 300;
-const MIN_LEVEL = 0.012;
-const MIN_BARGE_IN_LEVEL = 0.03;
-const ECHO_WINDOW_FRAMES = 12;
-const ECHO_MARGIN = 2;
-const INITIAL_ECHO_COUPLING = 1;
-const ECHO_COUPLING_KEY = "t3voice:echo-coupling";
+// Wind, breath and handling rumble sit under this (Presence's WIND_CUT_HZ).
+const WIND_CUT_HZ = 180;
+// Our reply's echo is still in the room this long after its audio ends.
+const ECHO_TAIL_MS = 600;
+// While a reply plays the mic is transcribed in segments this long, to look for Tim's words.
 const PROBE_SEGMENT_MS = 2_000;
-const MIN_ECHO_COUPLING = 0.05;
-const ELEVATED_OVER_TYPICAL = 1.6;
-const ELEVATED_MIN_MS = 100;
-// localStorage["t3voice:debug"] = "1" logs barge-in decisions to the console.
-const debug = (...parts: unknown[]) => {
-  if (localStorage.getItem("t3voice:debug") === "1") console.info("[t3voice]", ...parts);
-};
+// The gate heard Tim close while the reply played: his words must show within this.
+const BARGE_WINDOW_MS = 2_500;
+// Our own "heard you" tick is never Tim (Presence's gate.ignore during its call sounds).
+const BLIP_IGNORE_MS = 180;
+// A transcript taken over the reply counts as Tim when this share of its words are his (or it is short).
+const MIN_THEIR_SHARE = 0.3;
+const MAX_SHORT_INTERRUPTION = 6;
+// A segment never runs longer than this, even while the gate stays open on loud echo.
+const MAX_SEGMENT_MS = 6_000;
+// Under this much speech a lone word is a noise the recogniser named ("you", "the").
+const MIN_LONE_WORD_MS = 500;
+/**
+ * How long after the gate closes (its own HOLD_MS of quiet, ~0.7 s, already past) Tim's turn ends,
+ * by how his words so far end: a finished sentence ends soon, a pause after "and" or "um" waits.
+ */
+const END_AFTER_SENTENCE_MS = 300;
+const END_OPEN_MS = 800;
+const END_HESITATION_MS = 1_500;
+const HESITATION =
+  /(?:,|\b(?:um+|uh+|er+|erm|and|but|so|or|because|cause|like|the|a|an|to|of|for|with|that|which|if|when|then|i|my|your|is|are|was|were|we|you|it)\s*)$/i;
+// Backchannels never cut a reply off (ElevenLabs' interruption ignore terms, which Presence uses).
+const BACKCHANNEL = new Set([
+  "ok",
+  "okay",
+  "right",
+  "sure",
+  "yes",
+  "yeah",
+  "yep",
+  "mhm",
+  "mm",
+  "hmm",
+  "uh",
+  "huh",
+  "alright",
+  "cool",
+  "nice",
+  "got",
+  "it",
+]);
 
 // Captures the microphone as 16 kHz mono PCM in 20 ms frames, with each frame's level.
 const CAPTURE_WORKLET = `
@@ -78,6 +110,44 @@ class T3VoiceCapture extends AudioWorkletProcessor {
 registerProcessor("t3voice-capture", T3VoiceCapture);
 `;
 
+// Scribe sometimes writes full-width punctuation ("is，um..." / "is。").
+function asciiPunctuation(text: string): string {
+  return text
+    .replace(/[，、]/g, ", ")
+    .replace(/。/g, ". ")
+    .replace(/？/g, "? ")
+    .replace(/！/g, "! ")
+    .replace(/\s+/g, " ");
+}
+
+/** How long to wait after the gate closed before Tim's turn ends, from his words so far. */
+function endpointWait(partial: string): { readonly ms: number; readonly rule: string } {
+  const text = asciiPunctuation(partial).trim();
+  if (text === "") return { ms: END_OPEN_MS, rule: "no-words-yet" };
+  // A trailing "…" is a voice trailing off, not a finished sentence.
+  if (HESITATION.test(text) || /(?:\.\.\.|…)$/.test(text)) {
+    return { ms: END_HESITATION_MS, rule: "hesitation" };
+  }
+  if (/[.!?…]["')\]]*$/.test(text)) return { ms: END_AFTER_SENTENCE_MS, rule: "sentence" };
+  return { ms: END_OPEN_MS, rule: "open" };
+}
+
+/** Words in `heard` that are neither ours coming back nor a backchannel: Tim interrupting. */
+function interruptingWords(heard: string, spoken: ReadonlyArray<string>): ReadonlyArray<string> {
+  return foreignWords(heard, spoken).filter((word) => !BACKCHANNEL.has(word));
+}
+
+/**
+ * Whether a transcript taken while the reply played has Tim in it: a run of his words, and enough
+ * of them. A long transcript of our own echo always has a few garbled words; Tim's are a real share.
+ */
+function isInterruption(heard: string, spoken: ReadonlyArray<string>): boolean {
+  const all = heard.toLowerCase().match(/\p{L}[\p{L}'’]*|\d+/gu) ?? [];
+  const theirs = interruptingWords(heard, spoken);
+  if (theirs.length < 2 || !hasForeignRun(heard, spoken)) return false;
+  return all.length <= MAX_SHORT_INTERRUPTION || theirs.length / all.length >= MIN_THEIR_SHARE;
+}
+
 export class VoiceSession {
   private stream: MediaStream | null = null;
   private context: AudioContext | null = null;
@@ -94,25 +164,25 @@ export class VoiceSession {
     rate: 48_000,
   };
   private readonly stt = new RealtimeStt();
+  // A desktop mic sits further away than a phone held to the mouth: one sensitivity step more.
+  private readonly gate = createCloseTalk({
+    sensitivity: window.matchMedia("(pointer: coarse)").matches ? 0 : 1,
+  });
+  private ignoreGateUntil = 0;
+  private thinking = false;
   private preRoll: Int16Array[] = [];
-  private noiseFloor = MIN_LEVEL / 3;
-  private echoCoupling = Number(localStorage.getItem(ECHO_COUPLING_KEY)) || INITIAL_ECHO_COUPLING;
-  private probeMaxRatio = 0;
-  private probeRatioSum = 0;
-  private probeRatioFrames = 0;
-  private elevatedMs = 0;
-  /** The usual mic-to-speaker ratio while only our echo is heard. */
-  private echoTypical = 0.3;
-  private playedLevels: number[] = [];
-  private loudMs = 0;
-  private quietMs = 0;
-  private speechMs = 0;
   private inSpeech = false;
+  private speechMs = 0;
+  private closedMs = 0;
+  private utteranceStartedAt = 0;
+  private partial = "";
+  private partials = 0;
   private startedDuringReply = false;
   private probing = false;
   private probeMs = 0;
-  private lastForeign: ReadonlyArray<string> = [];
-  private segmentTail: { readonly text: string; readonly at: number } | null = null;
+  /** When the gate last opened on Tim's voice while a reply played (performance time), or 0. */
+  private closeVoiceAt = 0;
+  private rejectedInSegment = false;
   private pendingTranscriptions = 0;
   private phase: VoicePhase = "off";
   /** Chosen as each utterance starts; its reply is spoken with the same engine. */
@@ -126,6 +196,11 @@ export class VoiceSession {
     return this.stream !== null;
   }
 
+  /** The brain is working on a reply: Tim needs a little more to cut in (Presence's "think" bar). */
+  setThinking(thinking: boolean): void {
+    this.thinking = thinking;
+  }
+
   async start(): Promise<void> {
     if (this.stream !== null) return;
     // Mobile Safari only starts audio inside the tap itself, so the context comes before any await,
@@ -137,9 +212,16 @@ export class VoiceSession {
     if (audioSession !== undefined) audioSession.type = "play-and-record";
     this.engine = speechEngine();
     this.stt.warm();
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    // Presence's microphone: echo cancellation and noise suppression on, auto gain off (it lifts far
+    // voices in the pauses and flattens Tim's, the difference the gate reads), voice isolation where
+    // the platform has it.
+    const constraints: MediaTrackConstraints & { voiceIsolation?: boolean } = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: false,
+      voiceIsolation: true,
+    };
+    this.stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
     const moduleUrl = URL.createObjectURL(
       new Blob([CAPTURE_WORKLET], { type: "application/javascript" }),
     );
@@ -149,11 +231,15 @@ export class VoiceSession {
     capture.port.onmessage = (event: MessageEvent<{ pcm: Int16Array; level: number }>) =>
       this.onFrame(event.data.pcm, event.data.level);
     const microphone = context.createMediaStreamSource(this.stream);
-    microphone.connect(capture);
+    const windCut = context.createBiquadFilter();
+    windCut.type = "highpass";
+    windCut.frequency.value = WIND_CUT_HZ;
+    microphone.connect(windCut);
+    windCut.connect(capture);
     this.input = context.createAnalyser();
     this.input.fftSize = 2048;
     this.input.smoothingTimeConstant = 0.8;
-    microphone.connect(this.input);
+    windCut.connect(this.input);
     // A silent sink keeps the capture node pulled by the audio graph.
     const sink = context.createGain();
     sink.gain.value = 0;
@@ -161,18 +247,19 @@ export class VoiceSession {
     this.capture = capture;
     this.player = new SpeechPlayer(
       context,
-      (speaking) => {
-        if (!speaking) this.playedLevels = [];
-        this.updatePhase();
-      },
+      () => this.updatePhase(),
       this.events.onError,
       () => this.engine,
     );
+    voiceLog("system", "mic.open", {
+      engine: this.engine,
+      settings: this.stream.getAudioTracks()[0]?.getSettings?.() ?? null,
+    });
     this.updatePhase();
   }
 
   stop(): void {
-    this.player?.stop();
+    this.player?.stop("call ended");
     this.stt.close();
     if (this.capture !== null) this.capture.port.onmessage = null;
     for (const track of this.stream?.getTracks() ?? []) track.stop();
@@ -183,6 +270,7 @@ export class VoiceSession {
     this.player = null;
     this.input = null;
     this.inSpeech = false;
+    this.probing = false;
     this.setPhase("off");
   }
 
@@ -214,55 +302,43 @@ export class VoiceSession {
     };
   }
 
-  stopSpeaking(): void {
-    this.player?.stop();
+  stopSpeaking(reason = "tap"): void {
+    this.player?.stop(reason);
   }
 
   private onFrame(pcm: Int16Array, level: number): void {
     this.micLevel = level;
     const player = this.player;
     if (player === null) return;
-    const speaking = player.speaking;
-
-    // What the speakers are putting out over the last ~quarter second bounds the echo we can hear.
-    let reference = 0;
-    if (speaking) {
-      this.playedLevels.push(player.level());
-      if (this.playedLevels.length > ECHO_WINDOW_FRAMES) this.playedLevels.shift();
-      reference = Math.max(...this.playedLevels);
-    }
-    const echo = this.echoCoupling * reference;
-    const floor = speaking
-      ? Math.max(MIN_BARGE_IN_LEVEL, this.noiseFloor * 4)
-      : Math.max(MIN_LEVEL, this.noiseFloor * 3);
-    const loud = level > Math.max(floor, speaking ? echo * ECHO_MARGIN : 0);
-    if (!loud && !speaking && !this.inSpeech) {
-      this.noiseFloor = this.noiseFloor * 0.95 + level * 0.05;
-    }
-
-    if (loud) {
-      this.loudMs += FRAME_MS;
-      this.quietMs = 0;
-    } else {
-      // One quiet frame inside speech does not end the run.
-      this.loudMs = Math.max(0, this.loudMs - FRAME_MS);
-      this.quietMs += FRAME_MS;
+    const now = performance.now();
+    // The reply is heard while it plays, between its sentences and for its echo's tail.
+    const replyAudible = player.speaking || now < player.audibleUntil + ECHO_TAIL_MS;
+    const mode: CloseTalkMode = replyAudible ? "speak" : this.thinking ? "think" : "listen";
+    const decision =
+      now < this.ignoreGateUntil
+        ? null
+        : this.gate.step(10 * Math.log10(level * level + 1e-12), mode, FRAME_MS);
+    if (decision?.opened || decision?.closed) {
+      voiceLog("voice", decision.opened ? "gate.open" : "gate.close", {
+        mode,
+        by: decision.by,
+        level: Math.round(decision.level),
+        bar: Math.round(decision.bar),
+        floor: Math.round(decision.floor),
+        voice: Math.round(decision.voice),
+      });
     }
 
     if (this.probing) {
       this.stt.push(pcm);
       this.probeMs += FRAME_MS;
-      if (reference > 0.01) {
-        const ratio = level / reference;
-        this.probeMaxRatio = Math.max(this.probeMaxRatio, ratio);
-        this.probeRatioSum += ratio;
-        this.probeRatioFrames += 1;
-        if (ratio > this.echoTypical * ELEVATED_OVER_TYPICAL) this.elevatedMs += FRAME_MS;
-      }
-      if (speaking && this.loudMs >= BARGE_IN_MS) {
-        debug("barge: loud", { level, echo });
-        this.bargeIn();
-      } else if (!speaking || this.probeMs >= PROBE_SEGMENT_MS) {
+      if (decision?.opened && decision.by === "speak") this.closeVoiceAt = now;
+      // A segment never ends while the gate is open: Tim's interruption stays in one transcript.
+      if (
+        !replyAudible ||
+        (this.probeMs >= PROBE_SEGMENT_MS && !this.gate.open) ||
+        this.probeMs >= MAX_SEGMENT_MS
+      ) {
         this.endProbe();
       }
       return;
@@ -271,93 +347,107 @@ export class VoiceSession {
     if (!this.inSpeech) {
       this.preRoll.push(pcm);
       if (this.preRoll.length > PRE_ROLL_FRAMES) this.preRoll.shift();
-      if (speaking) this.beginProbe();
-      else if (this.loudMs >= SPEECH_START_MS) this.beginSpeech(false);
+      if (replyAudible) this.beginProbe();
+      else if (decision?.opened) this.beginSpeech(false);
       return;
     }
 
     this.stt.push(pcm);
     this.speechMs += FRAME_MS;
-    if (this.quietMs >= SPEECH_END_MS) {
-      const spokeLongEnough = this.speechMs - this.quietMs >= MIN_SPEECH_MS;
+    this.closedMs = this.gate.open ? 0 : this.closedMs + FRAME_MS;
+    const wait = endpointWait(this.partial);
+    if (this.closedMs >= wait.ms) {
+      voiceLog("voice", "turn.end", {
+        rule: wait.rule,
+        // The gate's own hold (~0.7 s of quiet) plus the wait after it closed.
+        silenceMs: 700 + this.closedMs,
+        partial: this.partial,
+      });
       this.inSpeech = false;
-      this.speechMs = 0;
-      this.loudMs = 0;
-      if (spokeLongEnough) this.finishUtterance();
-      else this.stt.discard();
+      this.finishUtterance();
       this.updatePhase();
     }
   }
 
   /**
-   * While a reply plays, the mic streams in short segments whose transcript shows whether Tim is
-   * talking over it; energy alone cannot tell him from loud speaker echo.
+   * While a reply plays, the mic streams in short segments; a reply stops only when the gate hears
+   * Tim close (in its speaking mode) and the segment's transcript has words that are his.
    */
   private beginProbe(): void {
     this.stt.warm();
     this.probing = true;
     this.probeMs = 0;
-    this.lastForeign = [];
-    this.probeMaxRatio = 0;
-    this.probeRatioSum = 0;
-    this.probeRatioFrames = 0;
-    this.elevatedMs = 0;
+    this.rejectedInSegment = false;
     this.stt.discard();
     for (const frame of this.preRoll) this.stt.push(frame);
     this.preRoll = [];
   }
 
-  // A run of words we did not say is Tim; so is a word of his that survives into the next partial.
+  private closeVoiceRecently(): boolean {
+    return this.gate.open || performance.now() - this.closeVoiceAt < BARGE_WINDOW_MS;
+  }
+
   private onPartial(text: string): void {
+    if (this.inSpeech) {
+      this.partial = text;
+      this.partials += 1;
+      return;
+    }
     if (!this.probing) return;
     const spoken = this.player?.recentlySpoken() ?? [];
-    const foreign = foreignWords(text, spoken);
-    const repeated = foreign.some((word) => this.lastForeign.includes(word));
-    this.lastForeign = foreign;
-    // Tim also adds energy over the usual echo; a garbled echo ("carbon dioxide") does not.
-    if ((hasForeignRun(text, spoken) || repeated) && this.elevatedMs >= ELEVATED_MIN_MS) {
-      debug("barge: transcript", text);
-      this.bargeIn();
+    if (!isInterruption(text, spoken)) return;
+    if (this.closeVoiceRecently()) {
+      this.bargeIn("close voice and new words", text);
+    } else if (!this.rejectedInSegment) {
+      // Echo or room noise the recogniser turned into words: the gate heard nobody close.
+      this.rejectedInSegment = true;
+      voiceLog("voice", "barge.rejected", { reason: "words without a close voice", heard: text });
     }
   }
 
   /** Tim is talking over the reply: stop it and keep the segment's audio as his utterance. */
-  private bargeIn(): void {
-    this.player?.stop();
+  private bargeIn(reason: string, heard: string): void {
+    voiceLog("voice", "barge.in", { reason, heard });
+    this.player?.stop(`barge-in: ${reason}`);
+    this.events.onStopped?.(reason);
     this.probing = false;
     this.inSpeech = true;
     this.startedDuringReply = true;
+    this.utteranceStartedAt = performance.now() - this.probeMs;
     this.speechMs = this.probeMs;
-    this.quietMs = 0;
+    this.closedMs = 0;
+    this.partial = heard;
+    this.partials = 1;
     this.updatePhase();
   }
 
   /** Closes a segment. Its final transcript can still show Tim (partials lag); else it was echo. */
   private endProbe(): void {
     this.probing = false;
-    const ratio = this.probeMaxRatio;
-    const typical = this.probeRatioFrames > 0 ? this.probeRatioSum / this.probeRatioFrames : null;
-    const elevated = this.elevatedMs >= ELEVATED_MIN_MS;
+    const closeVoice = this.closeVoiceRecently();
     void this.stt
       .commit({ fallback: false })
       .then((text) => {
+        if (this.stream === null || text.trim() === "") return;
         const spoken = this.player?.recentlySpoken() ?? [];
-        if (this.stream === null) return;
-        if (hasForeignRun(text, spoken) && elevated) {
-          debug("barge: late transcript", text);
-          this.player?.stop();
-          this.deliver(this.withSegmentTail(stripEcho(text, spoken)), spoken);
+        if (!isInterruption(text, spoken)) return;
+        if (!closeVoice) {
+          voiceLog("voice", "barge.rejected", {
+            reason: "words without a close voice",
+            heard: text,
+          });
           return;
         }
-        // A lone word of Tim's at a segment's end ("wait") belongs to what comes next.
-        const tail = stripEcho(text, spoken);
-        this.segmentTail = tail === "" ? null : { text: tail, at: performance.now() };
-        // Rise fast, sink slowly: how loud our own echo gets sets the energy barge-in bar.
-        this.echoCoupling =
-          ratio > this.echoCoupling ? ratio : this.echoCoupling * 0.9 + ratio * 0.1;
-        this.echoCoupling = Math.max(MIN_ECHO_COUPLING, this.echoCoupling);
-        if (typical !== null) this.echoTypical = this.echoTypical * 0.7 + typical * 0.3;
-        localStorage.setItem(ECHO_COUPLING_KEY, String(this.echoCoupling));
+        voiceLog("voice", "barge.in", {
+          reason: "close voice and new words (segment end)",
+          heard: text,
+        });
+        this.player?.stop("barge-in: close voice and new words (segment end)");
+        this.events.onStopped?.("close voice and new words");
+        this.deliver(stripEcho(text, spoken), spoken, {
+          speechMs: PROBE_SEGMENT_MS,
+          duringReply: true,
+        });
       })
       .catch(() => {});
   }
@@ -367,7 +457,11 @@ export class VoiceSession {
     this.stt.warm();
     this.inSpeech = true;
     this.startedDuringReply = duringReply;
-    this.speechMs = this.loudMs;
+    this.utteranceStartedAt = performance.now() - this.preRoll.length * FRAME_MS;
+    this.speechMs = 0;
+    this.closedMs = 0;
+    this.partial = "";
+    this.partials = 0;
     this.stt.discard();
     for (const frame of this.preRoll) this.stt.push(frame);
     this.preRoll = [];
@@ -376,6 +470,9 @@ export class VoiceSession {
 
   private finishUtterance(): void {
     const startedDuringReply = this.startedDuringReply;
+    const speechMs = this.speechMs - this.closedMs;
+    const partials = this.partials;
+    const startedAt = this.utteranceStartedAt;
     this.pendingTranscriptions += 1;
     this.blip();
     this.updatePhase();
@@ -383,13 +480,17 @@ export class VoiceSession {
       .commit()
       .then((text) => {
         const spoken = this.player?.recentlySpoken() ?? [];
-        this.deliver(
-          startedDuringReply ? this.withSegmentTail(stripEcho(text, spoken)) : text,
-          spoken,
-        );
+        this.deliver(startedDuringReply ? stripEcho(text, spoken) : text, spoken, {
+          speechMs,
+          partials,
+          startedAt,
+          duringReply: startedDuringReply,
+        });
       })
       .catch((error: unknown) => {
-        this.events.onError(error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        voiceLog("system", "error", { where: "stt", engine: this.engine, message });
+        this.events.onError(message);
       })
       .finally(() => {
         this.pendingTranscriptions -= 1;
@@ -397,15 +498,41 @@ export class VoiceSession {
       });
   }
 
-  private withSegmentTail(text: string): string {
-    const tail = this.segmentTail;
-    this.segmentTail = null;
-    return tail !== null && performance.now() - tail.at < 3_000 ? `${tail.text} ${text}` : text;
-  }
-
-  private deliver(transcript: string, spoken: ReadonlyArray<string>): void {
-    const heard = transcript.replace(/^[\s.,;:!?…-]+/, "");
-    if (this.stream === null || !hasRealWords(heard) || isEchoOfSpoken(heard, spoken)) return;
+  private deliver(
+    transcript: string,
+    spoken: ReadonlyArray<string>,
+    info: {
+      readonly speechMs: number;
+      readonly partials?: number;
+      readonly startedAt?: number;
+      readonly duringReply: boolean;
+    },
+  ): void {
+    const heard = asciiPunctuation(transcript)
+      .replace(/^[\s.,;:!?…-]+/, "")
+      .trim();
+    const words = heard.split(/\s+/).filter(Boolean);
+    const drop = !hasRealWords(heard)
+      ? "no real words"
+      : isEchoOfSpoken(heard, spoken)
+        ? "our own words coming back"
+        : words.length === 1 && info.speechMs < MIN_LONE_WORD_MS
+          ? "a lone word from a short noise"
+          : null;
+    const detail = {
+      text: heard,
+      engine: this.engine,
+      speechMs: Math.round(info.speechMs),
+      partials: info.partials ?? null,
+      startedMsAgo: info.startedAt ? Math.round(performance.now() - info.startedAt) : null,
+      duringReply: info.duringReply,
+    };
+    if (this.stream === null) return;
+    if (drop !== null) {
+      voiceLog("tim", "utterance.dropped", { ...detail, reason: drop });
+      return;
+    }
+    voiceLog("tim", "utterance", detail);
     this.events.onUtterance(heard);
   }
 
@@ -413,6 +540,7 @@ export class VoiceSession {
   private blip(): void {
     const context = this.context;
     if (context === null) return;
+    this.ignoreGateUntil = performance.now() + BLIP_IGNORE_MS;
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     oscillator.frequency.value = 880;

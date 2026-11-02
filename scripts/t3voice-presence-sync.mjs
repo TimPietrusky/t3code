@@ -38,6 +38,8 @@ const modules = [
   ["presence/asciiline.mjs", "asciiline.js"],
   ["shared/wave.mjs", "wave.js"],
   ["shared/speech.mjs", "speech-constants.js"],
+  // Presence's close-talk gate: only Tim talking close to the mic starts a turn or cuts a reply.
+  ["shared/closetalk.mjs", "closetalk.js"],
 ];
 for (const [from, to] of modules) {
   const text = recolor(read(from))

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { markUpdateReady } from "./phoneUpdate";
+import { voiceLog } from "./voiceLog";
 
 const POLL_MS = 2_000;
 
@@ -31,6 +32,7 @@ export function PhoneBuildReload() {
   useEffect(() => {
     let loaded: string | null = null;
     let outdated = false;
+    let announced = false;
     async function check() {
       if (document.visibilityState !== "visible") return;
       try {
@@ -46,8 +48,15 @@ export function PhoneBuildReload() {
         // Offline for a moment; the next poll tries again.
       }
       if (!outdated) return;
+      if (!announced) {
+        announced = true;
+        voiceLog("system", "update.ready", { idle: idle() });
+      }
       markUpdateReady();
-      if (idle()) window.location.reload();
+      if (idle()) {
+        voiceLog("system", "reload", { why: "new phone build, voice off" });
+        window.location.reload();
+      }
     }
     void check();
     const timer = window.setInterval(() => void check(), POLL_MS);

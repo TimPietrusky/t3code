@@ -54,6 +54,16 @@ function publish(startedAt) {
   log(
     `published build ${id}${startedAt ? ` (${Date.now() - startedAt} ms after the change)` : ""}`,
   );
+  // The same line in the session log (apps/web/vite/sessionLog.ts), so a reload has its cause there.
+  try {
+    const day = new Date().toLocaleDateString("sv-SE");
+    const dir = NodePath.join(process.env.HOME ?? "", "Library/Logs/t3voice");
+    NodeFS.mkdirSync(dir, { recursive: true });
+    NodeFS.appendFileSync(
+      NodePath.join(dir, `sessions-${day}.jsonl`),
+      `${JSON.stringify({ at: new Date().toISOString(), who: "system", type: "build.published", id, head: head() })}\n`,
+    );
+  } catch {}
 }
 
 NodeFS.rmSync(stage, { recursive: true, force: true });

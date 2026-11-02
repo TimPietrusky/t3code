@@ -13,13 +13,14 @@ import { primaryServerSettingsAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { markBriefed, needsBrief, withBrief } from "./brief";
-import { useSpeechEngine } from "./engine";
+import { speechEngine, useSpeechEngine } from "./engine";
 import { type VoicePhase, VoiceSession } from "./speech";
 import { takeSentences } from "./speechText";
 import { useComposerClearance } from "./useComposerClearance";
 import { VoiceBar, type VoiceBarState } from "./VoiceBar";
 import { VoiceEngineToggle } from "./VoiceEngineToggle";
 import { VoiceExtras } from "./VoiceExtras";
+import { endVoiceLogSession, startVoiceLogSession, voiceLog } from "./voiceLog";
 import { syncVoiceTheme } from "./voiceThemeSync";
 
 // A T3VOICE_MODEL test run gets its own thread, so it never becomes the user's voice thread.
@@ -61,6 +62,9 @@ export function VoiceHost() {
   const sessionStartedAtRef = useRef(0);
   // Says one short line when a turn has produced no speech for a while, so the loop never goes quiet.
   const holdTimerRef = useRef<number | null>(null);
+  // When Tim's last words went to the thread (performance time), for the log's reply timings.
+  const sentAtRef = useRef(0);
+  const firstTextLoggedRef = useRef(false);
   // How much of each reply has been queued for speech, by turn item id.
   const spokenRef = useRef(new Map<string, number>());
   // The thread this client just created, until its shell arrives.
@@ -193,9 +197,13 @@ export function VoiceHost() {
       return;
     }
     if (briefed) markBriefed(threadId);
+    voiceLog("tim", "send", { text, briefed, threadId });
+    sentAtRef.current = performance.now();
+    firstTextLoggedRef.current = false;
     if (holdTimerRef.current !== null) window.clearTimeout(holdTimerRef.current);
     holdTimerRef.current = window.setTimeout(() => {
       holdTimerRef.current = null;
+      voiceLog("voice", "hold-line", { afterMs: HOLD_AFTER_MS });
       sessionRef.current?.speak("One moment.");
     }, HOLD_AFTER_MS);
   });
@@ -204,13 +212,14 @@ export function VoiceHost() {
     const current = sessionRef.current;
     // While a reply plays, a tap only stops the reply; on a phone its speaker sits next to the mic.
     if (current?.active && phase === "speaking") {
-      current.stopSpeaking();
+      current.stopSpeaking("tap");
       setStoppedAt(Date.now());
       return;
     }
     if (current?.active) {
       current.stop();
       sessionRef.current = null;
+      endVoiceLogSession("mic off (tap)");
       return;
     }
     setError(null);
@@ -220,8 +229,13 @@ export function VoiceHost() {
         if (next === "hearing") setError(null);
       },
       onUtterance: (text) => void send(text),
-      onError: setError,
+      onError: (message) => {
+        voiceLog("system", "error", { where: "voice", message });
+        setError(message);
+      },
+      onStopped: () => setStoppedAt(Date.now()),
     });
+    startVoiceLogSession({ engine: speechEngine(), thread: voiceThread?.id ?? null });
     sessionRef.current = session;
     sessionStartedAtRef.current = Date.now();
     setStarting(true);
@@ -235,6 +249,11 @@ export function VoiceHost() {
     }
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tells the session while the brain works, so Tim needs a little more to cut in (Presence's think bar)
+  useEffect(() => {
+    sessionRef.current?.setThinking(thinking);
+  }, [thinking]);
+
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- speaks the voice thread's replies sentence by sentence as they stream while the mic is on
   useEffect(() => {
     const session = sessionRef.current;
@@ -246,13 +265,28 @@ export function VoiceHost() {
       if (startedAt < sessionStartedAtRef.current - 1_000) continue;
       const queued = spokenRef.current.get(item.id) ?? 0;
       if (queued >= item.text.length && item.streaming) continue;
+      if (!firstTextLoggedRef.current && item.text.length > 0 && sentAtRef.current > 0) {
+        firstTextLoggedRef.current = true;
+        voiceLog("brain", "first-text", {
+          msSinceSend: Math.round(performance.now() - sentAtRef.current),
+          streaming: item.streaming,
+        });
+      }
       const { sentences, consumed } = takeSentences(item.text.slice(queued), !item.streaming);
       spokenRef.current.set(item.id, queued + consumed);
       if (sentences.length > 0 && holdTimerRef.current !== null) {
         window.clearTimeout(holdTimerRef.current);
         holdTimerRef.current = null;
       }
-      for (const sentence of sentences) session.speak(sentence);
+      for (const sentence of sentences) {
+        voiceLog("brain", "sentence", {
+          text: sentence,
+          streaming: item.streaming,
+          msSinceSend:
+            sentAtRef.current > 0 ? Math.round(performance.now() - sentAtRef.current) : null,
+        });
+        session.speak(sentence);
+      }
     }
   }, [items]);
 

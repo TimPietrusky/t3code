@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { type CallWaveLevels, type CallWaveSpectrum, createCallWave } from "./presence/callwave";
 import { createFrame, type PresenceFrame } from "./presence/frame";
 import { useUpdateReady } from "./phoneUpdate";
+import { voiceLog } from "./voiceLog";
 import { BAR_HTML } from "./presence/markup";
 import "./presence/presence.css";
 import "./voiceBar.css";
@@ -162,7 +163,10 @@ export function VoiceBar(props: {
                 <button
                   type="button"
                   data-t3voice-update=""
-                  onClick={() => window.location.reload()}
+                  onClick={() => {
+                    voiceLog("system", "reload", { why: "update chip tapped" });
+                    window.location.reload();
+                  }}
                 >
                   update
                 </button>

@@ -5,6 +5,7 @@
  * which gives the echo detector the exact level being played.
  */
 import type { SpeechEngine } from "./engine";
+import { voiceLog } from "./voiceLog";
 
 const TTS_SAMPLE_RATE = 24_000;
 const FIRST_CHUNK_SAMPLES = 1_200; // 50 ms: start quickly
@@ -13,6 +14,7 @@ const SCHEDULE_AHEAD_S = 0.03;
 
 type QueuedSentence = {
   readonly text: string;
+  readonly queuedAt: number;
   readonly chunks: Float32Array<ArrayBuffer>[];
   done: boolean;
   failed: boolean;
@@ -28,8 +30,14 @@ export class SpeechPlayer {
   private running = false;
   /** Bumped by stop(), so an interrupted run ends at its next await. */
   private generation = 0;
+  /** When the audio scheduled so far stops being heard (performance time). */
+  private endsAt = 0;
+  /** The sentence being played, for the log when something cuts it off. */
+  private current: string | null = null;
   /** Sentences spoken in the last few seconds, to recognise our own words coming back. */
-  private recent: Array<{ readonly text: string; readonly at: number }> = [];
+  // Kept until 15 s after each sentence's audio ends: a long reply is scheduled well ahead of being
+  // heard, so its echo comes back long after the sentence was queued (2 Nov: Tim's 120-point reply cut itself off).
+  private recent: Array<{ readonly text: string; until: number }> = [];
 
   constructor(
     private readonly context: AudioContext,
@@ -55,6 +63,11 @@ export class SpeechPlayer {
     return this.running;
   }
 
+  /** When the last scheduled audio ends (performance time); its echo is heard a little longer. */
+  get audibleUntil(): number {
+    return this.endsAt;
+  }
+
   /** RMS of what is being played right now. */
   level(): number {
     this.output.getFloatTimeDomainData(this.frame);
@@ -65,18 +78,35 @@ export class SpeechPlayer {
 
   recentlySpoken(withinMs = 15_000): ReadonlyArray<string> {
     const since = performance.now() - withinMs;
-    this.recent = this.recent.filter((entry) => entry.at >= since);
+    this.recent = this.recent.filter((entry) => entry.until >= since);
     return this.recent.map((entry) => entry.text);
   }
 
   speak(text: string): void {
-    const sentence: QueuedSentence = { text, chunks: [], done: false, failed: false, wake: null };
+    const sentence: QueuedSentence = {
+      text,
+      queuedAt: performance.now(),
+      chunks: [],
+      done: false,
+      failed: false,
+      wake: null,
+    };
     this.queue.push(sentence);
     void this.stream(sentence, this.aborter.signal);
     if (!this.running) void this.run();
   }
 
-  stop(): void {
+  /** Stops the reply now; `reason` goes to the session log (tap, barge-in, end of call). */
+  stop(reason = "stop"): void {
+    if (this.running || this.queue.length > 0) {
+      voiceLog("voice", "playback.stop", {
+        reason,
+        cut: this.current,
+        dropped: this.queue.slice(1).map((sentence) => sentence.text),
+      });
+    }
+    this.current = null;
+    this.endsAt = 0;
     this.generation += 1;
     this.aborter.abort();
     this.aborter = new AbortController();
@@ -133,7 +163,11 @@ export class SpeechPlayer {
       emit(true);
     } catch (error) {
       sentence.failed = true;
-      if (!signal.aborted) this.onError(error instanceof Error ? error.message : String(error));
+      if (!signal.aborted) {
+        const message = error instanceof Error ? error.message : String(error);
+        voiceLog("system", "error", { where: "tts", engine: this.engine(), message });
+        this.onError(message);
+      }
     } finally {
       sentence.done = true;
       notify();
@@ -148,13 +182,23 @@ export class SpeechPlayer {
       const sentence = this.queue[0]!;
       let played = 0;
       let announced = false;
+      let heard: { readonly text: string; until: number } | null = null;
       for (;;) {
         if (played < sentence.chunks.length) {
           if (!announced) {
-            this.recent.push({ text: sentence.text, at: performance.now() });
+            heard = { text: sentence.text, until: performance.now() };
+            this.recent.push(heard);
             announced = true;
+            this.current = sentence.text;
+            voiceLog("voice", "say", {
+              text: sentence.text,
+              engine: this.engine(),
+              // From the sentence being queued to its first audio being scheduled.
+              waitMs: Math.round(performance.now() - sentence.queuedAt),
+            });
           }
           playhead = this.schedule(sentence.chunks[played]!, playhead);
+          if (heard !== null) heard.until = this.endsAt;
           played += 1;
           continue;
         }
@@ -171,6 +215,7 @@ export class SpeechPlayer {
     if (remaining > 0) await new Promise((resolve) => window.setTimeout(resolve, remaining * 1000));
     if (generation !== this.generation) return;
     if (this.queue.length > 0) return void this.run();
+    this.current = null;
     this.setRunning(false);
   }
 
@@ -184,6 +229,10 @@ export class SpeechPlayer {
     source.onended = () => this.sources.delete(source);
     this.sources.add(source);
     source.start(startAt);
+    this.endsAt = Math.max(
+      this.endsAt,
+      performance.now() + (startAt + buffer.duration - this.context.currentTime) * 1000,
+    );
     return startAt + buffer.duration;
   }
 
