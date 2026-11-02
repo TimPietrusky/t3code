@@ -94,7 +94,7 @@ ${scope(recolor(read("presence/bar.css")))}
 );
 
 // The markup: Presence's footer (the call frame and its rail), without the conversation, the
-// write panel and the typing field, plus one slot tab for small controls (t3 voice's own).
+// write panel, the typing field and its key, plus one slot tab for small controls (t3 voice's own).
 const html = read("presence/index.html");
 let footer = html.slice(html.indexOf('<footer class="bar"'), html.indexOf("</footer>") + 9);
 footer = footer
@@ -104,9 +104,9 @@ footer = footer
   .replace(/<div class="bar-prompt"[^>]*><\/div>/, "")
   .replace('<div class="fr-tmr"', '<div class="fr-slot" data-slot></div><div class="fr-tmr"')
   .replace(/\n\s*\n/g, "\n");
-const keyboard =
-  '<svg class="a-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></svg>';
-footer = footer.replace(/(<button class="bar-type"[^>]*>)(<\/button>)/, `$1${keyboard}$2`);
+// No key at the right end: T3's own composer is right there (Tim, 2 Nov). The room takes its width
+// (voiceBar.css); the timer and slot tabs stay on the top edge.
+footer = footer.replace(/<button class="bar-type"[^>]*><\/button>/, "");
 write(
   "markup.js",
   `${banner("presence/index.html")}export const BAR_HTML = ${JSON.stringify(recolor(footer))};\n`,

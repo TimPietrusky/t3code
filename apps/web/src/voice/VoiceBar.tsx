@@ -47,8 +47,8 @@ const REST_MS = 100;
 /**
  * The voice control: Presence's call frame itself (presence/, copied by
  * scripts/t3voice-presence-sync.mjs, green instead of red), driven by t3 voice's state and audio.
- * The room is the one tap target; the key focuses T3's composer; `toggle` sits in a small tab on
- * the top edge. `bottom` lifts the frame over a composer pinned below it.
+ * The room is the one tap target (no key: T3's composer is right there); `toggle` sits in a small
+ * tab on the top edge. `bottom` lifts the frame over a composer pinned below it.
  */
 export function VoiceBar(props: {
   readonly state: VoiceBarState;
@@ -93,15 +93,6 @@ export function VoiceBar(props: {
     const talk = root.querySelector<HTMLButtonElement>("[data-talk]");
     const onTalk = () => press();
     talk?.addEventListener("click", onTalk);
-    const type = root.querySelector<HTMLButtonElement>("[data-type]");
-    // Not pointerdown: WebKit on a phone then drops the click (Presence's note).
-    const keepFocus = (event: MouseEvent) => event.preventDefault();
-    const onType = () =>
-      document
-        .querySelector<HTMLElement>('[data-testid="composer-editor"] [contenteditable="true"]')
-        ?.focus();
-    type?.addEventListener("mousedown", keepFocus);
-    type?.addEventListener("click", onType);
     setSlot(root.querySelector<HTMLElement>("[data-slot]"));
 
     let stopped = false;
@@ -121,8 +112,6 @@ export function VoiceBar(props: {
       window.clearTimeout(handle);
       window.cancelAnimationFrame(handle);
       talk?.removeEventListener("click", onTalk);
-      type?.removeEventListener("mousedown", keepFocus);
-      type?.removeEventListener("click", onType);
       frameRef.current = null;
       root.replaceChildren();
     };

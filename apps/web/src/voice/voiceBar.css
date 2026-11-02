@@ -1,5 +1,17 @@
 /* t3 voice's additions to Presence's bar (presence/presence.css stays a verbatim copy). */
 
+/* No key at the right end (the sync drops it): the room, its wave and its tick rail take the width. */
+[data-t3voice-presence] .bar-line {
+  right: 0;
+}
+[data-t3voice-presence] .fr-wv {
+  right: 1px;
+}
+[data-t3voice-presence] .fr-rail,
+[data-t3voice-presence] .fr-segs {
+  right: 12px;
+}
+
 /* Above T3's own layers. */
 [data-t3voice-presence] .bar {
   z-index: 50;
