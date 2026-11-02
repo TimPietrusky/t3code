@@ -59,7 +59,7 @@ export function VoiceBar(props: {
   readonly label: string;
   readonly bottom: number;
   readonly onPress: () => void;
-  /** Small controls for the slot tab on the top edge (the engine switch, VoiceEngineToggle). */
+  /** Small controls for the slot tab on the top edge. */
   readonly toggle?: ReactNode;
   /** This frame's audio for the wave; null while voice is off. */
   readonly analysis?: () => VoiceBarAnalysis | null;

@@ -18,7 +18,6 @@ import { type VoicePhase, VoiceSession } from "./speech";
 import { takeSentences } from "./speechText";
 import { useComposerClearance } from "./useComposerClearance";
 import { VoiceBar, type VoiceBarState } from "./VoiceBar";
-import { VoiceEngineToggle } from "./VoiceEngineToggle";
 import { VoiceExtras } from "./VoiceExtras";
 import { endVoiceLogSession, startVoiceLogSession, voiceLog } from "./voiceLog";
 import { syncVoiceTheme } from "./voiceThemeSync";
@@ -381,7 +380,6 @@ export function VoiceHost() {
         }
         bottom={clearance}
         onPress={() => void toggle()}
-        toggle={<VoiceEngineToggle onChange={() => setError(null)} />}
         analysis={() => sessionRef.current?.analysis() ?? null}
         stoppedAt={stoppedAt}
       />

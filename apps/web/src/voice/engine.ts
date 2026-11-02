@@ -5,8 +5,6 @@
  */
 import { useSyncExternalStore } from "react";
 
-import { voiceLog } from "./voiceLog";
-
 export type SpeechEngine = "elevenlabs" | "local";
 
 const KEY = "t3voice:engine";
@@ -14,12 +12,6 @@ const listeners = new Set<() => void>();
 
 export function speechEngine(): SpeechEngine {
   return localStorage.getItem(KEY) === "local" ? "local" : "elevenlabs";
-}
-
-export function setSpeechEngine(engine: SpeechEngine): void {
-  voiceLog("system", "engine.switch", { from: speechEngine(), to: engine });
-  localStorage.setItem(KEY, engine);
-  for (const listener of listeners) listener();
 }
 
 /** Calls `listener` whenever the choice changes, in this tab or another. Returns the unsubscribe. */
