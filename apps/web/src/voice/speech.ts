@@ -16,6 +16,7 @@ import {
   speakableText,
   stripEcho,
 } from "./speechText";
+import { VoiceComb } from "./voiceComb";
 import { voiceLog } from "./voiceLog";
 
 export type VoicePhase = "off" | "listening" | "hearing" | "transcribing" | "speaking";
@@ -69,6 +70,13 @@ const END_OPEN_MS = 1_600;
 const END_HESITATION_MS = 2_300;
 // Quiet means within this many dB of the room's floor: his soft trailing words are not.
 const QUIET_OVER_FLOOR_DB = 8;
+// Loud is Tim only with a voice in it (Presence's harmonic comb, voiceComb.ts) this recently: steps,
+// traffic and wind never hold a turn open, hold a reply back or pause it (2 Nov, walking: steps kept
+// turns open 7-18 s and paused "One moment." for 5 s).
+const VOICE_HOLD_MS = 700;
+// The comb counts once it heard Tim in a turn with words this long; until then levels decide alone,
+// as before (it fails open, like Presence's gate stages).
+const VOICE_PROOF_MS = 300;
 const HESITATION =
   /(?:,|\b(?:um+|uh+|er+|erm|and|but|so|or|because|cause|like|the|a|an|to|of|for|with|that|which|if|when|then|i|my|your|is|are|was|were|we|you|it)\s*)$/i;
 // Backchannels never cut a reply off (ElevenLabs' interruption ignore terms, which Presence uses).
@@ -190,6 +198,14 @@ export class VoiceSession {
     rate: 48_000,
   };
   private readonly stt = new RealtimeStt();
+  private comb: VoiceComb | null = null;
+  private combProven = false;
+  private lastVoiceAt = Number.NEGATIVE_INFINITY;
+  /** A voice is sounding, or did within VOICE_HOLD_MS (always, until the comb is proven). */
+  private voiceLike = true;
+  /** The turn in progress has a voice in it (the comb or real words): only then is it Tim's. */
+  private turnVoiced = false;
+  private turnVoiceMs = 0;
   // A desktop mic sits further away than a phone held to the mouth: one sensitivity step more.
   private readonly gate = createCloseTalk({
     sensitivity: window.matchMedia("(pointer: coarse)").matches ? 0 : 1,
@@ -278,6 +294,8 @@ export class VoiceSession {
     this.input.fftSize = 2048;
     this.input.smoothingTimeConstant = 0.8;
     windCut.connect(this.input);
+    this.comb = new VoiceComb(context);
+    windCut.connect(this.comb.analyser);
     // A silent sink keeps the capture node pulled by the audio graph.
     const sink = context.createGain();
     sink.gain.value = 0;
@@ -332,6 +350,7 @@ export class VoiceSession {
     this.capture = null;
     this.player = null;
     this.input = null;
+    this.comb = null;
     this.inSpeech = false;
     this.probing = false;
     this.setPhase("off");
@@ -348,11 +367,26 @@ export class VoiceSession {
       this.waiting.push(spoken);
       return;
     }
+    if (this.inSpeech) this.dropNoiseTurn("a reply is ready");
     this.player?.speak(spoken);
   }
 
+  /** Tim talking: a turn with his voice in it, the gate open on a voice, or his words being written. */
   private timHasTheFloor(): boolean {
-    return this.inSpeech || this.gate.open || this.pendingTranscriptions > 0;
+    return (
+      (this.inSpeech && this.turnVoiced) ||
+      (this.gate.open && this.voiceLike) ||
+      this.pendingTranscriptions > 0
+    );
+  }
+
+  /** A turn the gate opened on noise alone: no words, no voice. Nothing of it is Tim's. */
+  private dropNoiseTurn(reason: string): void {
+    if (!this.inSpeech || this.turnVoiced) return;
+    voiceLog("voice", "turn.noise", { reason, ms: this.speechMs });
+    this.inSpeech = false;
+    this.stt.discard();
+    this.updatePhase();
   }
 
   /**
@@ -397,7 +431,11 @@ export class VoiceSession {
     const player = this.player;
     if (player === null) return;
     const now = performance.now();
+    const voiceNow = this.comb?.step(FRAME_MS) ?? false;
+    if (voiceNow) this.lastVoiceAt = now;
+    this.voiceLike = !this.combProven || now - this.lastVoiceAt < VOICE_HOLD_MS;
     if (this.waiting.length > 0 && !this.timHasTheFloor()) {
+      this.dropNoiseTurn("a reply is ready");
       voiceLog("voice", "say.released", { sentences: this.waiting.length });
       for (const sentence of this.waiting) player.speak(sentence);
       this.waiting = [];
@@ -430,7 +468,7 @@ export class VoiceSession {
     if (this.replyDbs.length > 10) this.replyDbs.shift();
     const overReply =
       20 * Math.log10(level + 1e-9) >= Math.max(...this.replyDbs) - HOLD_OVER_REPLY_DB;
-    this.overReplyMs = close && overReply ? this.overReplyMs + FRAME_MS : 0;
+    this.overReplyMs = close && overReply && this.voiceLike ? this.overReplyMs + FRAME_MS : 0;
     if (decision?.opened && decision.by === "speak") this.closeVoiceAt = this.strongVoiceAt = now;
     if (
       this.overReplyMs >= HOLD_OVER_MS &&
@@ -446,7 +484,7 @@ export class VoiceSession {
       }
     }
     if (player.holding) {
-      if (this.gate.open || this.gate.voiced) this.heldVoiceAt = now;
+      if ((this.gate.open || this.gate.voiced) && this.voiceLike) this.heldVoiceAt = now;
       else if (this.heldVoiceAt < this.holdAt) this.heldVoiceAt = this.holdAt;
       if (now - this.heldVoiceAt >= HOLD_RELEASE_MS || now - this.holdAt >= HOLD_MAX_MS) {
         voiceLog("voice", "barge.released", { heldMs: Math.round(now - this.holdAt) });
@@ -465,7 +503,7 @@ export class VoiceSession {
       if (decision?.opened && decision.by === "speak") this.closeVoiceAt = now;
       // The reply ended while Tim is talking (he answers the moment the question ends): the segment
       // is his turn, not a probe (2 Nov: his "keep it" vanished three times between reply and turn).
-      if (!replyAudible && (this.gate.open || this.gate.voiced)) {
+      if (!replyAudible && (this.gate.open || this.gate.voiced) && this.voiceLike) {
         this.probeToTurn();
         return;
       }
@@ -498,17 +536,20 @@ export class VoiceSession {
 
     this.stt.push(pcm);
     this.speechMs += FRAME_MS;
-    const quiet =
-      !this.gate.open &&
-      !this.gate.voiced &&
-      20 * Math.log10(level + 1e-9) < this.floorDb + QUIET_OVER_FLOOR_DB;
-    this.closedMs = quiet ? this.closedMs + FRAME_MS : 0;
+    if (voiceNow) this.turnVoiceMs += FRAME_MS;
+    if (!this.turnVoiced && (voiceNow || !this.combProven)) this.markTurnVoiced();
+    const loud =
+      this.gate.open ||
+      this.gate.voiced ||
+      20 * Math.log10(level + 1e-9) >= this.floorDb + QUIET_OVER_FLOOR_DB;
+    this.closedMs = loud && this.voiceLike ? 0 : this.closedMs + FRAME_MS;
     const wait = endpointWait(this.partial);
     if (this.closedMs >= wait.ms) {
+      if (!this.turnVoiced) return this.dropNoiseTurn("no voice");
       voiceLog("voice", "turn.end", {
         rule: wait.rule,
-        // The gate's own hold (~0.7 s of quiet) plus the wait after it closed.
-        silenceMs: 700 + this.closedMs,
+        quietMs: this.closedMs,
+        voiceMs: this.turnVoiceMs,
         partial: this.partial,
       });
       this.inSpeech = false;
@@ -535,6 +576,8 @@ export class VoiceSession {
     voiceLog("voice", "probe.to-turn", { ms: this.probeMs });
     this.probing = false;
     this.inSpeech = true;
+    this.turnVoiced = true;
+    this.turnVoiceMs = 0;
     this.startedDuringReply = false;
     this.utteranceStartedAt = performance.now() - this.probeMs;
     this.speechMs = this.probeMs;
@@ -552,8 +595,20 @@ export class VoiceSession {
     return this.gate.open || performance.now() - this.closeVoiceAt < BARGE_WINDOW_MS;
   }
 
+  private markTurnVoiced(): void {
+    this.turnVoiced = true;
+    this.updatePhase();
+  }
+
   private onPartial(text: string): void {
     if (this.inSpeech) {
+      if (hasRealWords(text)) {
+        if (!this.combProven && this.turnVoiceMs >= VOICE_PROOF_MS) {
+          this.combProven = true;
+          voiceLog("voice", "voice-check.on", { voiceMs: this.turnVoiceMs });
+        }
+        if (!this.turnVoiced) this.markTurnVoiced();
+      }
       // New words are Tim still talking, whatever the level says.
       if (wordCount(text) > wordCount(this.partial)) this.closedMs = 0;
       this.partial = text;
@@ -583,6 +638,8 @@ export class VoiceSession {
     this.events.onStopped?.(reason);
     this.probing = false;
     this.inSpeech = true;
+    this.turnVoiced = true;
+    this.turnVoiceMs = 0;
     this.startedDuringReply = true;
     this.utteranceStartedAt = performance.now() - this.probeMs;
     this.speechMs = this.probeMs;
@@ -631,6 +688,8 @@ export class VoiceSession {
     this.engine = speechEngine();
     this.stt.warm();
     this.inSpeech = true;
+    this.turnVoiced = false;
+    this.turnVoiceMs = 0;
     this.startedDuringReply = duringReply;
     this.utteranceStartedAt = performance.now() - this.preRoll.length * FRAME_MS;
     this.speechMs = 0;
@@ -737,7 +796,7 @@ export class VoiceSession {
 
   private updatePhase(): void {
     if (this.stream === null) return this.setPhase("off");
-    if (this.inSpeech) return this.setPhase("hearing");
+    if (this.inSpeech && this.turnVoiced) return this.setPhase("hearing");
     if (this.player?.speaking) return this.setPhase("speaking");
     if (this.pendingTranscriptions > 0) return this.setPhase("transcribing");
     this.setPhase("listening");
