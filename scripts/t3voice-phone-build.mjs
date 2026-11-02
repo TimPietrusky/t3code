@@ -63,22 +63,57 @@ const build = NodeChildProcess.spawn(
   { cwd: web, env: { ...process.env, VITE_T3VOICE: "1" }, stdio: ["ignore", "pipe", "pipe"] },
 );
 
+// One phone build per change set, never one per save: a finished build is only staged; it is
+// published when a commit lands (HEAD moves: the brain commits each change) or when edits have
+// settled for SETTLE_MS without one, and never while a newer build is still running.
+const SETTLE_MS = 20_000;
 let startedAt = 0;
+let building = false;
+let staged = false;
+let lastBuiltAt = 0;
+let publishedHead = null;
+const head = () => {
+  try {
+    return NodeChildProcess.execFileSync("git", ["rev-parse", "HEAD"], { cwd: root })
+      .toString()
+      .trim();
+  } catch {
+    return null;
+  }
+};
+function maybePublish() {
+  if (!staged || building) return;
+  const now = head();
+  const committed = now !== null && now !== publishedHead;
+  if (!committed && Date.now() - lastBuiltAt < SETTLE_MS) return;
+  try {
+    publish(startedAt);
+    publishedHead = now;
+    staged = false;
+    startedAt = 0;
+  } catch (error) {
+    log(`publish failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 function onOutput(chunk) {
   for (const line of String(chunk).split("\n")) {
-    if (/build started|file changed|changed/i.test(line) && startedAt === 0) startedAt = Date.now();
+    if (/build started|file changed|changed/i.test(line)) {
+      building = true;
+      if (startedAt === 0) startedAt = Date.now();
+    }
     if (/built in [\d.]+\s*m?s/i.test(line)) {
-      try {
-        publish(startedAt);
-      } catch (error) {
-        log(`publish failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      startedAt = 0;
+      building = false;
+      staged = true;
+      lastBuiltAt = Date.now();
+      // The first build after start goes out at once.
+      if (publishedHead === null) publishedHead = "";
+      maybePublish();
     } else if (/\bError\b|\[error\]|failed to/.test(line)) {
       log(line.trim());
     }
   }
 }
+setInterval(maybePublish, 2_000);
 build.stdout.on("data", onOutput);
 build.stderr.on("data", onOutput);
 build.on("exit", (code) => {

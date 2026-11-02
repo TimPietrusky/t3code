@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 
-const POLL_MS = 2_000;
-// Voice states in which a reload would cut Tim off or lose what he just said.
-const BUSY = new Set(["hearing", "transcribing", "thinking", "speaking"]);
+import { markUpdateReady } from "./phoneUpdate";
 
-function busy(): boolean {
-  const state = document.querySelector<HTMLElement>("[data-t3voice-bar]")?.dataset.state ?? "";
+const POLL_MS = 2_000;
+
+/** Reloading is only safe with the mic off (the bar on standby) and nothing typed in a field. */
+function idle(): boolean {
+  const state =
+    document.querySelector<HTMLElement>("[data-t3voice-presence]")?.dataset.voiceState ?? "off";
   const active = document.activeElement;
   // The composer is focused on load; only a field with text in it means someone is typing.
   const typing =
@@ -15,13 +17,14 @@ function busy(): boolean {
         ? active.textContent
         : ""
     )?.trim() !== "";
-  return BUSY.has(state) || typing;
+  return state === "off" && !typing;
 }
 
 /**
  * The phone's production build of t3 voice is rebuilt as the brain edits the UI
- * (scripts/t3voice-phone-build.mjs). This picks up a new build by reloading the page, but only while
- * voice is idle and nothing is being typed; until then it keeps waiting.
+ * (scripts/t3voice-phone-build.mjs). This picks up a new build by reloading the page, but never
+ * during a call: with the mic on, the bar shows an update chip (a tap applies it) and the reload
+ * waits until the mic is off and nothing is being typed.
  */
 export function PhoneBuildReload() {
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- polls the served build id, which lives outside React
@@ -42,7 +45,9 @@ export function PhoneBuildReload() {
       } catch {
         // Offline for a moment; the next poll tries again.
       }
-      if (outdated && !busy()) window.location.reload();
+      if (!outdated) return;
+      markUpdateReady();
+      if (idle()) window.location.reload();
     }
     void check();
     const timer = window.setInterval(() => void check(), POLL_MS);

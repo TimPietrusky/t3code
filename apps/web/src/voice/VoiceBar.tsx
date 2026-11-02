@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 
 import { type CallWaveLevels, type CallWaveSpectrum, createCallWave } from "./presence/callwave";
 import { createFrame, type PresenceFrame } from "./presence/frame";
+import { useUpdateReady } from "./phoneUpdate";
 import { BAR_HTML } from "./presence/markup";
 import "./presence/presence.css";
 import "./voiceBar.css";
@@ -67,6 +68,7 @@ export function VoiceBar(props: {
   const rootRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<PresenceFrame | null>(null);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const updateReady = useUpdateReady();
 
   const press = useEffectEvent(() => props.onPress());
   const readAnalysis = useEffectEvent(() => props.analysis?.() ?? null);
@@ -148,9 +150,28 @@ export function VoiceBar(props: {
       <div
         ref={rootRef}
         data-t3voice-presence=""
+        // PhoneBuildReload reads this: no reload unless voice is off.
+        data-voice-state={props.state}
         style={lift > 0 ? ({ "--kb": `${lift}px` } as CSSProperties) : undefined}
       />
-      {slot !== null && props.toggle ? createPortal(props.toggle, slot) : null}
+      {slot !== null
+        ? createPortal(
+            <>
+              {updateReady ? (
+                // A newer phone build waits; during a call it applies only on this tap.
+                <button
+                  type="button"
+                  data-t3voice-update=""
+                  onClick={() => window.location.reload()}
+                >
+                  update
+                </button>
+              ) : null}
+              {props.toggle}
+            </>,
+            slot,
+          )
+        : null}
     </>
   );
 }

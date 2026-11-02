@@ -48,3 +48,18 @@
 [data-t3voice-presence] .fr[data-look~="off"] .fr-slot {
   opacity: 0.8;
 }
+
+/* A newer phone build is ready: a tap applies it (it never reloads by itself during a call). */
+[data-t3voice-presence] [data-t3voice-update] {
+  margin-right: 6px;
+  padding: 1px 4px 0;
+  border: 0;
+  color: var(--hud);
+  background: none;
+  font: 600 var(--tab-fs) / 1 var(--font-tag);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px var(--hud-3);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
