@@ -13,11 +13,12 @@ import { primaryServerSettingsAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { markBriefed, needsBrief, withBrief } from "./brief";
-import { setSpeechEngine, useSpeechEngine } from "./engine";
+import { useSpeechEngine } from "./engine";
 import { type VoicePhase, VoiceSession } from "./speech";
 import { takeSentences } from "./speechText";
 import { useComposerClearance } from "./useComposerClearance";
 import { VoiceBar, type VoiceBarState } from "./VoiceBar";
+import { VoiceEngineToggle } from "./VoiceEngineToggle";
 import { VoiceExtras } from "./VoiceExtras";
 import { syncVoiceTheme } from "./voiceThemeSync";
 
@@ -295,11 +296,7 @@ export function VoiceHost() {
         }
         bottom={clearance}
         onPress={() => void toggle()}
-        engine={engine}
-        onEngine={(next) => {
-          setSpeechEngine(next);
-          setError(null);
-        }}
+        toggle={<VoiceEngineToggle onChange={() => setError(null)} />}
       />
     </>
   );
