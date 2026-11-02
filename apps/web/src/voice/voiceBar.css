@@ -83,3 +83,14 @@
   position: absolute;
   width: min(780px, calc(100% - 2 * var(--grid-edge)));
 }
+
+/* On a view with a composer the bar takes its column (VoiceDock measures it), not the dock's centre
+   and 780px: its box is the column, so the frame sits 10px in and its brackets inside. Without a
+   composer (the canvas) the dock's centring above stays. */
+[data-t3voice-dock][data-t3voice-column] [data-t3voice-presence] .bar {
+  position: fixed;
+  left: var(--t3voice-col-left);
+  right: auto;
+  width: var(--t3voice-col-width);
+  margin-inline: 0;
+}
