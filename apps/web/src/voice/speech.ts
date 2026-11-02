@@ -329,6 +329,11 @@ export class VoiceSession {
       });
     }
 
+    if (this.probing && speechEngine() === "local") {
+      // Switched to LAI mid-segment: drop it, nothing heard during a reply counts there.
+      this.probing = false;
+      this.stt.discard();
+    }
     if (this.probing) {
       this.stt.push(pcm);
       this.probeMs += FRAME_MS;
@@ -347,8 +352,11 @@ export class VoiceSession {
     if (!this.inSpeech) {
       this.preRoll.push(pcm);
       if (this.preRoll.length > PRE_ROLL_FRAMES) this.preRoll.shift();
-      if (replyAudible) this.beginProbe();
-      else if (decision?.opened) this.beginSpeech(false);
+      // Local speech-to-text has no voice detection of its own and turns the reply's echo into words
+      // on a phone: on LAI only a tap stops a reply (2 Nov stopgap, replies cut themselves off).
+      if (replyAudible) {
+        if (speechEngine() !== "local") this.beginProbe();
+      } else if (decision?.opened) this.beginSpeech(false);
       return;
     }
 
