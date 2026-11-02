@@ -7,7 +7,7 @@
 #   scripts/t3voice-speech.sh start    start in the background unless it already answers
 #   scripts/t3voice-speech.sh stop     stop the one started in the background
 #
-# The venv and the models (~1.5 GB, downloaded once) live in $T3VOICE_SPEECH_HOME
+# The venv and the models (~2.6 GB, downloaded once) live in $T3VOICE_SPEECH_HOME
 # (default ~/.cache/t3voice). Logs: /tmp/t3voice-speech/speech.log (apart from /tmp/t3voice).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
