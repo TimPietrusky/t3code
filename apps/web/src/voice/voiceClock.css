@@ -1,0 +1,17 @@
+[data-t3voice-clock] {
+  position: fixed;
+  z-index: 50;
+  top: max(6px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 6px 0;
+  border: 1px solid rgba(61, 255, 143, 0.34);
+  color: #3dff8f;
+  background: rgba(11, 15, 13, 0.85);
+  font-family: "Oxanium", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
