@@ -17,6 +17,10 @@ const REFUSED = [/^\/mcp(?:[/?]|$)/, /^\/oauth(?:[/?]|$)/, /^\/\.well-known\/oau
 
 const refused = (url = "") => REFUSED.some((pattern) => pattern.test(url));
 
+// One line per request: method, path without its query, status. Never headers, cookies or bodies.
+const logLine = (method, url = "", status) =>
+  console.log(`${new Date().toISOString()} ${method} ${url.split("?")[0]} ${status}`);
+
 // The reverse proxy may send its own Host; T3 checks the browser's Origin against the public one.
 function forwardedHeaders(req) {
   const headers = { ...req.headers };
@@ -29,6 +33,7 @@ function forwardedHeaders(req) {
 
 const server = NodeHttp.createServer((req, res) => {
   if (refused(req.url)) {
+    logLine(req.method, req.url, 404);
     res.writeHead(404).end();
     return;
   }
@@ -41,6 +46,13 @@ const server = NodeHttp.createServer((req, res) => {
       headers: forwardedHeaders(req),
     },
     (response) => {
+      if (
+        !req.url?.startsWith("/src/") &&
+        !req.url?.startsWith("/@") &&
+        !req.url?.startsWith("/node_modules/")
+      ) {
+        logLine(req.method, req.url, response.statusCode);
+      }
       res.writeHead(response.statusCode ?? 502, response.headers);
       response.pipe(res);
     },
@@ -54,9 +66,11 @@ const server = NodeHttp.createServer((req, res) => {
 
 server.on("upgrade", (req, socket, head) => {
   if (refused(req.url)) {
+    logLine("UPGRADE", req.url, "refused");
     socket.destroy();
     return;
   }
+  logLine("UPGRADE", req.url, "->");
   const upstream = NodeNet.connect(targetPort, "127.0.0.1", () => {
     const headers = forwardedHeaders(req);
     const lines = Object.entries(headers).flatMap(([name, value]) =>

@@ -21,6 +21,8 @@ The voice thread is a normal agent with T3's tools, briefed by `apps/web/src/voi
 
 Speech is ElevenLabs: Scribe realtime in (streamed while you talk, transcript about half a second after you stop) and Flash v2.5 with the American "Jessica" voice out, spoken sentence by sentence as the reply streams. The key stays in the dev server process: `ELEVENLABS_API_KEY`, or Infisical through `kale-secret-get`. Overrides: `T3VOICE_PORT`, `T3VOICE_MODEL` (model for a new voice thread), `T3VOICE_VOICE_ID`, `T3VOICE_TTS_MODEL`, `T3VOICE_STT_MODEL`. `localStorage["t3voice:debug"] = "1"` logs barge-in decisions in the browser console.
 
+On a phone: `https://kale-board.eu1.netbird.services` (NetBird SSO for the `kale-board-tim` group) reaches `scripts/t3voice-phone.mjs` on this Mac's NetBird address, port 4850, which forwards to the dev server and refuses MCP and OAuth. `T3VOICE_PUBLIC_ORIGIN=https://kale-board.eu1.netbird.services scripts/t3voice.sh pair` writes a phone pairing link (threads only: read and operate) to `/tmp/t3voice/pair-link.txt`. Two LaunchAgents keep both running across crashes and reboots: `computer.kale.t3voice.web` (the dev server) and `computer.kale.t3voice.phone` (the front door), logs in `~/Library/Logs/t3voice/`.
+
 Why it attaches to the live server instead of running its own: the fork's client and the installed nightly speak the same orchestration protocol (2), the web dev proxy already forwards `/api` and `/ws` to any `T3CODE_PORT`, and `t3 pair` is the product's own way to give a new browser origin a normal session. If upstream `main` and the installed nightly ever drift apart in protocol, rebase `voice` on the `v0.1.4-nightly.*` tag that matches the installed version.
 
 ## "Wait, what are you selling me?"
