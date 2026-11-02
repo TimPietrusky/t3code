@@ -13,6 +13,7 @@ import { primaryServerSettingsAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { markBriefed, needsBrief, withBrief } from "./brief";
+import { setSpeechEngine, useSpeechEngine } from "./engine";
 import { type VoicePhase, VoiceSession } from "./speech";
 import { takeSentences } from "./speechText";
 import { useComposerClearance } from "./useComposerClearance";
@@ -24,6 +25,7 @@ import { syncVoiceTheme } from "./voiceThemeSync";
 const voiceThreadTitle = (config: VoiceConfig | null) =>
   config?.model ? `voice test (${config.model})` : "voice";
 const HOLD_AFTER_MS = 3_500;
+const LOCAL_HEALTH_EVERY_MS = 10_000;
 
 type VoiceConfig = {
   readonly speech: boolean;
@@ -47,6 +49,9 @@ export function VoiceHost() {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
   const [phase, setPhase] = useState<VoicePhase>("off");
   const [error, setError] = useState<string | null>(null);
+  const engine = useSpeechEngine();
+  // Why local speech cannot be used right now (service down or loading); null when it is ready.
+  const [localProblem, setLocalProblem] = useState<string | null>(null);
   const sessionRef = useRef<VoiceSession | null>(null);
   const sessionStartedAtRef = useRef(0);
   // Says one short line when a turn has produced no speech for a while, so the loop never goes quiet.
@@ -94,6 +99,28 @@ export function VoiceHost() {
       cancelled = true;
     };
   }, []);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- polls the local speech service while it is the chosen engine, so the bar says when it is down instead of falling back
+  useEffect(() => {
+    if (engine !== "local") return;
+    let cancelled = false;
+    const check = () =>
+      fetch("/__t3voice/local/health")
+        .then(async (response) => {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          if (!cancelled)
+            setLocalProblem(response.ok ? null : (body.error ?? "Local speech is down"));
+        })
+        .catch(() => {
+          if (!cancelled) setLocalProblem("Local speech is down");
+        });
+    void check();
+    const timer = window.setInterval(check, LOCAL_HEALTH_EVERY_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [engine]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- installs the brain-edited theme file as T3's "Voice" theme
   useEffect(() => syncVoiceTheme(), []);
@@ -241,20 +268,24 @@ export function VoiceHost() {
 
   if (config === null) return <VoiceExtras />;
 
+  // ElevenLabs needs the key in the dev server; local speech needs its service up.
+  const unavailable =
+    engine === "local"
+      ? localProblem
+      : config.speech
+        ? null
+        : "ElevenLabs needs scripts/t3voice.sh";
+  const message = error ?? unavailable;
   const state: VoiceBarState =
-    error !== null || !config.speech
-      ? "error"
-      : phase === "listening" && thinking
-        ? "thinking"
-        : phase;
+    message !== null ? "error" : phase === "listening" && thinking ? "thinking" : phase;
 
   return (
     <>
       <VoiceExtras />
       <VoiceBar
         state={state}
-        message={error ?? (config.speech ? null : "Voice needs scripts/t3voice.sh")}
-        disabled={!config.speech}
+        message={message}
+        disabled={engine === "elevenlabs" && !config.speech}
         label={
           phase === "off"
             ? "Start voice (Ctrl+Option+V)"
@@ -264,6 +295,11 @@ export function VoiceHost() {
         }
         bottom={clearance}
         onPress={() => void toggle()}
+        engine={engine}
+        onEngine={(next) => {
+          setSpeechEngine(next);
+          setError(null);
+        }}
       />
     </>
   );

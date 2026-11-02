@@ -1,6 +1,9 @@
 import { MicIcon, PowerIcon } from "lucide-react";
 
+import type { SpeechEngine } from "./engine";
 import "./voiceBar.css";
+
+const ENGINES: ReadonlyArray<SpeechEngine> = ["elevenlabs", "local"];
 
 export type VoiceBarState =
   | "off"
@@ -40,6 +43,8 @@ export function VoiceBar(props: {
   readonly label: string;
   readonly bottom: number;
   readonly onPress: () => void;
+  readonly engine: SpeechEngine;
+  readonly onEngine: (engine: SpeechEngine) => void;
 }) {
   const { state } = props;
   const hot = state === "hearing" || state === "speaking";
@@ -89,6 +94,21 @@ export function VoiceBar(props: {
         <span data-t3v="word" data-t3voice-label>
           {WORD[state]}
         </span>
+      </span>
+      {/* Which speech engine hears and speaks; a switch applies from the next utterance. */}
+      <span data-t3v="engines" role="radiogroup" aria-label="Speech engine">
+        {ENGINES.map((engine) => (
+          <button
+            key={engine}
+            type="button"
+            role="radio"
+            aria-checked={props.engine === engine}
+            data-t3v="engine"
+            onClick={() => props.onEngine(engine)}
+          >
+            {engine}
+          </button>
+        ))}
       </span>
     </div>
   );

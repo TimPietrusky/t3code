@@ -3,6 +3,7 @@
  * replies spoken sentence by sentence. Barge-in only fires when the mic is clearly louder than the
  * echo of what is playing, and transcripts of our own words are dropped (laptop speakers).
  */
+import { type SpeechEngine, speechEngine } from "./engine";
 import { SpeechPlayer } from "./player";
 import { RealtimeStt, STT_SAMPLE_RATE } from "./realtimeStt";
 import {
@@ -104,6 +105,8 @@ export class VoiceSession {
   private segmentTail: { readonly text: string; readonly at: number } | null = null;
   private pendingTranscriptions = 0;
   private phase: VoicePhase = "off";
+  /** Chosen as each utterance starts; its reply is spoken with the same engine. */
+  private engine: SpeechEngine = speechEngine();
 
   constructor(private readonly events: VoiceSessionEvents) {
     this.stt.onPartial = (text) => this.onPartial(text);
@@ -122,6 +125,7 @@ export class VoiceSession {
     void context.resume();
     const audioSession = (navigator as { audioSession?: { type: string } }).audioSession;
     if (audioSession !== undefined) audioSession.type = "play-and-record";
+    this.engine = speechEngine();
     this.stt.warm();
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -147,6 +151,7 @@ export class VoiceSession {
         this.updatePhase();
       },
       this.events.onError,
+      () => this.engine,
     );
     this.updatePhase();
   }
@@ -319,6 +324,7 @@ export class VoiceSession {
   }
 
   private beginSpeech(duringReply: boolean): void {
+    this.engine = speechEngine();
     this.stt.warm();
     this.inSpeech = true;
     this.startedDuringReply = duringReply;

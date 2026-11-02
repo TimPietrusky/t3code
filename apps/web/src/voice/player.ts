@@ -4,6 +4,8 @@
  * chunk and the next sentence is ready when the current one ends. All speech passes one analyser,
  * which gives the echo detector the exact level being played.
  */
+import type { SpeechEngine } from "./engine";
+
 const TTS_SAMPLE_RATE = 24_000;
 const FIRST_CHUNK_SAMPLES = 1_200; // 50 ms: start quickly
 const CHUNK_SAMPLES = 4_800; // then 200 ms pieces
@@ -33,6 +35,8 @@ export class SpeechPlayer {
     private readonly context: AudioContext,
     private readonly onSpeakingChange: (speaking: boolean) => void,
     private readonly onError: (message: string) => void,
+    /** Both engines stream the same 16-bit 24 kHz PCM. */
+    private readonly engine: () => SpeechEngine,
   ) {
     this.output = context.createAnalyser();
     this.output.fftSize = 512;
@@ -83,14 +87,17 @@ export class SpeechPlayer {
       wake?.();
     };
     try {
-      const response = await fetch("/__t3voice/tts", {
+      const response = await fetch(`/__t3voice/tts?engine=${this.engine()}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: sentence.text, format: "pcm" }),
         signal,
       });
       if (!response.ok || response.body === null) {
-        throw new Error(`speech failed (${response.status})`);
+        const body = (await response.json().catch(() => ({}))) as { error?: unknown };
+        throw new Error(
+          typeof body.error === "string" ? body.error : `speech failed (${response.status})`,
+        );
       }
       const reader = response.body.getReader();
       let pending = new Uint8Array(0);

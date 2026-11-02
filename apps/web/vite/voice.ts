@@ -1,13 +1,17 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Vite config runs before any Effect runtime.
 import * as NodePath from "node:path";
+import * as NodeNet from "node:net";
 import type { Connect, Plugin } from "vite-plus";
 
 /**
- * Dev-only speech endpoints for t3 voice (`apps/web/src/voice`). The ElevenLabs key stays in this
- * Vite process; the browser only sends audio or text to `/__t3voice/*` on its own origin.
- * Start through `scripts/t3voice.sh`, which loads the key into this process's environment.
+ * Dev-only speech endpoints for t3 voice: the browser only talks to `/__t3voice/*` on its own origin.
+ * `engine=elevenlabs` keeps the key in this process (`scripts/t3voice.sh`); `engine=local` and
+ * `/__t3voice/local/*` (incl. the STT socket) go to `scripts/t3voice-speech.sh` on loopback.
  */
 const API = "https://api.elevenlabs.io";
+const LOCAL_PORT = Number(process.env.T3VOICE_LOCAL_PORT?.trim() || 5797);
+const LOCAL = `http://127.0.0.1:${LOCAL_PORT}`;
+const LOCAL_DOWN = "Local speech is down. Start it: scripts/t3voice-speech.sh";
 const PREFIX = "/__t3voice";
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const MAX_TTS_CHARS = 1_200;
@@ -84,11 +88,59 @@ async function transcribe(audio: Buffer, contentType: string): Promise<string> {
   return typeof body.text === "string" ? body.text.trim() : "";
 }
 
+async function fetchLocal(path: string, init: RequestInit): Promise<Response> {
+  try {
+    const timeout = AbortSignal.timeout(20_000);
+    const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+    return await fetch(`${LOCAL}${path}`, { ...init, signal });
+  } catch (error) {
+    throw new Error(LOCAL_DOWN, { cause: error });
+  }
+}
+
+async function transcribeLocal(audio: Buffer, contentType: string): Promise<string> {
+  const response = await fetchLocal("/stt", {
+    method: "POST",
+    headers: { "content-type": contentType },
+    body: new Uint8Array(audio),
+  });
+  const body = (await response.json()) as { text?: unknown; error?: unknown };
+  if (!response.ok)
+    throw new Error(`local speech-to-text: ${String(body.error ?? response.status)}`);
+  return typeof body.text === "string" ? body.text.trim() : "";
+}
+
+const localError = (error: unknown): string =>
+  error instanceof Error && error.message === LOCAL_DOWN ? LOCAL_DOWN : describe(error);
+
+/** Pipes the browser's realtime STT socket to the local service, like a reverse proxy would. */
+function proxyLocalSocket(
+  req: import("node:http").IncomingMessage,
+  socket: import("node:stream").Duplex,
+  head: Buffer,
+) {
+  const upstream = NodeNet.connect(LOCAL_PORT, "127.0.0.1", () => {
+    const lines = Object.entries(req.headers).flatMap(([name, value]) =>
+      name === "host" ? [] : (Array.isArray(value) ? value : [value]).map((v) => `${name}: ${v}`),
+    );
+    upstream.write(
+      `GET /stt/stream HTTP/1.1\r\nhost: 127.0.0.1:${LOCAL_PORT}\r\n${lines.join("\r\n")}\r\n\r\n`,
+    );
+    if (head.length > 0) upstream.write(head);
+    socket.pipe(upstream);
+    upstream.pipe(socket);
+  });
+  upstream.on("error", () => socket.destroy());
+  socket.on("error", () => upstream.destroy());
+}
+
 export function t3VoicePlugin(): Plugin {
   const handle: Connect.NextHandleFunction = (req, res, next) => {
     const url = req.url ?? "";
     if (!url.startsWith(`${PREFIX}/`)) return next();
     const route = url.slice(PREFIX.length).split("?")[0];
+
+    const engine = new URLSearchParams(url.split("?")[1] ?? "").get("engine");
 
     if (route === "/config" && req.method === "GET") {
       sendJson(res, 200, {
@@ -98,6 +150,56 @@ export function t3VoicePlugin(): Plugin {
       });
       return;
     }
+
+    if (route === "/local/health" && req.method === "GET") {
+      fetch(`${LOCAL}/health`, { signal: AbortSignal.timeout(2_000) })
+        .then(async (response) => {
+          const body = (await response.json()) as { ready?: unknown };
+          if (body.ready === true) sendJson(res, 200, { ready: true });
+          else sendJson(res, 503, { error: "Local speech is still loading its models" });
+        })
+        .catch(() => sendJson(res, 503, { error: LOCAL_DOWN }));
+      return;
+    }
+
+    if (route === "/stt" && req.method === "POST" && engine === "local") {
+      readBody(req, MAX_AUDIO_BYTES)
+        .then((audio) => transcribeLocal(audio, req.headers["content-type"] ?? "audio/wav"))
+        .then((text) => sendJson(res, 200, { text }))
+        .catch((error: unknown) => sendJson(res, 502, { error: localError(error) }));
+      return;
+    }
+
+    if (route === "/tts" && req.method === "POST" && engine === "local") {
+      const aborter = new AbortController();
+      res.on("close", () => aborter.abort());
+      readBody(req, 64 * 1024)
+        .then(async (raw) => {
+          const { text } = JSON.parse(raw.toString("utf8")) as { text?: unknown };
+          if (typeof text !== "string" || text.trim() === "") throw new Error("no text");
+          const response = await fetchLocal("/tts", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ text: text.slice(0, MAX_TTS_CHARS) }),
+            signal: aborter.signal,
+          });
+          if (!response.ok || response.body === null) {
+            throw new Error(`local text-to-speech answered ${response.status}`);
+          }
+          // Raw 16-bit 24 kHz PCM, the same as ElevenLabs' pcm_24000.
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/octet-stream");
+          res.setHeader("cache-control", "no-store");
+          for await (const chunk of response.body) res.write(chunk);
+          res.end();
+        })
+        .catch((error: unknown) => {
+          if (res.headersSent) res.end();
+          else if (!aborter.signal.aborted) sendJson(res, 502, { error: localError(error) });
+        });
+      return;
+    }
+
     if (voiceKey() === "") {
       sendJson(res, 503, {
         error: "No ElevenLabs key in the dev server; start it with scripts/t3voice.sh.",
@@ -175,6 +277,9 @@ export function t3VoicePlugin(): Plugin {
     apply: "serve",
     configureServer(server) {
       server.middlewares.use(handle);
+      server.httpServer?.on("upgrade", (req, socket, head) => {
+        if (req.url?.split("?")[0] === `${PREFIX}/local/stt`) proxyLocalSocket(req, socket, head);
+      });
     },
   };
 }

@@ -1,9 +1,10 @@
 /**
- * Streaming speech-to-text through ElevenLabs Scribe realtime. The dev server mints a single-use
- * token (`/__t3voice/stt-token`), the browser streams 16 kHz PCM only while Tim is talking, and a
- * manual commit at the end of each utterance returns its final transcript within a few hundred
- * milliseconds. When the socket is unavailable, the utterance goes to the batch endpoint instead.
+ * Streaming speech-to-text: ElevenLabs Scribe realtime, or local Parakeet speaking the same messages
+ * via `/__t3voice/local/stt`. 16 kHz PCM streams only while Tim talks; a manual commit per utterance
+ * returns its transcript. Without a socket, the same engine's batch endpoint takes it, never the other.
  */
+import { type SpeechEngine, speechEngine } from "./engine";
+
 export const STT_SAMPLE_RATE = 16_000;
 
 const COMMIT_TIMEOUT_MS = 3_000;
@@ -52,8 +53,11 @@ function wavOfPcm(chunks: ReadonlyArray<Int16Array>): Blob {
   });
 }
 
-async function transcribeBatch(chunks: ReadonlyArray<Int16Array>): Promise<string> {
-  const response = await fetch("/__t3voice/stt", {
+async function transcribeBatch(
+  chunks: ReadonlyArray<Int16Array>,
+  engine: SpeechEngine,
+): Promise<string> {
+  const response = await fetch(`/__t3voice/stt?engine=${engine}`, {
     method: "POST",
     headers: { "content-type": "audio/wav" },
     body: wavOfPcm(chunks),
@@ -63,6 +67,22 @@ async function transcribeBatch(chunks: ReadonlyArray<Int16Array>): Promise<strin
   return body.text?.trim() ?? "";
 }
 
+async function socketUrl(engine: SpeechEngine): Promise<string> {
+  if (engine === "local") {
+    return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/__t3voice/local/stt`;
+  }
+  const response = await fetch("/__t3voice/stt-token", { method: "POST" });
+  const body = (await response.json()) as { token?: string; error?: string };
+  if (!response.ok || !body.token) throw new Error(body.error ?? "no speech token");
+  const params = new URLSearchParams({
+    model_id: "scribe_v2_realtime",
+    audio_format: "pcm_16000",
+    commit_strategy: "manual",
+    token: body.token,
+  });
+  return `wss://api.elevenlabs.io/v1/speech-to-text/realtime?${params}`;
+}
+
 type PendingCommit = {
   readonly resolve: (text: string) => void;
   readonly reject: (error: Error) => void;
@@ -70,6 +90,8 @@ type PendingCommit = {
 
 export class RealtimeStt {
   private socket: WebSocket | null = null;
+  /** The engine of the open (or opening) socket and of the utterance in progress. */
+  private engine: SpeechEngine = speechEngine();
   private ready: Promise<WebSocket> | null = null;
   private pending: PendingCommit[] = [];
   private closed = false;
@@ -79,8 +101,19 @@ export class RealtimeStt {
   onPartial: ((text: string) => void) | null = null;
   private unsent: Int16Array[] = [];
 
-  /** Opens the socket ahead of time so the first utterance does not wait for it. */
+  /**
+   * Opens the socket ahead of time so the first utterance does not wait for it. Called as each
+   * utterance starts: a changed engine choice switches the socket here, between utterances.
+   */
   warm(): void {
+    const engine = speechEngine();
+    if (engine !== this.engine && this.pending.length === 0) {
+      this.engine = engine;
+      const socket = this.socket;
+      this.socket = null;
+      this.ready = null;
+      socket?.close();
+    }
     void this.connect().catch(() => {});
   }
 
@@ -109,6 +142,7 @@ export class RealtimeStt {
   /** Ends the utterance and resolves with its transcript. `fallback: false` skips the batch retry. */
   async commit({ fallback = true }: { readonly fallback?: boolean } = {}): Promise<string> {
     const utterance = this.utterance;
+    const engine = this.engine;
     const commit = new Promise<string>((resolve, reject) => {
       this.pending.push({ resolve, reject });
     });
@@ -118,7 +152,7 @@ export class RealtimeStt {
     this.utterance = [];
     if (!sent) {
       this.pending.pop();
-      return fallback ? transcribeBatch(utterance) : "";
+      return fallback ? transcribeBatch(utterance, engine) : "";
     }
     let timer: number | undefined;
     const timeout = new Promise<never>((_, reject) => {
@@ -127,11 +161,11 @@ export class RealtimeStt {
     try {
       const text = await Promise.race([commit, timeout]);
       // A session that reconnected mid-utterance can commit only silence; the batch has it all.
-      return text === "" && fallback ? await transcribeBatch(utterance) : text;
+      return text === "" && fallback ? await transcribeBatch(utterance, engine) : text;
     } catch {
       // A dropped socket or a slow commit: the batch endpoint still has the whole utterance.
       this.socket?.close();
-      return fallback ? transcribeBatch(utterance) : "";
+      return fallback ? transcribeBatch(utterance, engine) : "";
     } finally {
       window.clearTimeout(timer);
     }
@@ -159,20 +193,13 @@ export class RealtimeStt {
   private connect(): Promise<WebSocket> {
     if (this.ready !== null) return this.ready;
     this.closed = false;
+    const engine = this.engine;
     const ready = (async () => {
-      const response = await fetch("/__t3voice/stt-token", { method: "POST" });
-      const body = (await response.json()) as { token?: string; error?: string };
-      if (!response.ok || !body.token) throw new Error(body.error ?? "no speech token");
-      const params = new URLSearchParams({
-        model_id: "scribe_v2_realtime",
-        audio_format: "pcm_16000",
-        commit_strategy: "manual",
-        token: body.token,
-      });
-      const socket = new WebSocket(`wss://api.elevenlabs.io/v1/speech-to-text/realtime?${params}`);
+      const socket = new WebSocket(await socketUrl(engine));
       socket.onmessage = (event) => this.onMessage(event);
       // ElevenLabs closes a session after ~15 s without audio; the next utterance reconnects.
       socket.onclose = () => {
+        if (this.engine !== engine) return;
         if (this.socket !== socket && this.socket !== null) return;
         this.socket = null;
         if (this.ready === ready) this.ready = null;
@@ -193,7 +220,7 @@ export class RealtimeStt {
         });
         socket.addEventListener("close", () => reject(new Error("socket closed")), { once: true });
       });
-      if (this.closed) {
+      if (this.closed || this.engine !== engine) {
         socket.close();
         throw new Error("closed");
       }
