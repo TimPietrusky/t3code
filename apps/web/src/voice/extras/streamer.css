@@ -1,0 +1,16 @@
+/* Word-locked scrambling: each fake word is laid over its real word, which keeps the space but is
+   never drawn, so text wraps exactly as before; only the fake words go through the mosaic. */
+[data-streamer-word] {
+  position: relative;
+  display: inline-block;
+}
+[data-streamer-ghost] {
+  visibility: hidden;
+}
+[data-streamer-mask] {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  filter: url(#t3-streamer-pixelate);
+}

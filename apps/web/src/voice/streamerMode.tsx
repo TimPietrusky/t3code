@@ -32,20 +32,22 @@ const SALT = Math.floor(Math.random() * 0x7fffffff);
  * Each word becomes random characters of its length, seeded by the word and its place, so the
  * text keeps its shape, re-renders never flicker, and streamed text only changes its last word.
  */
+function scrambleWord(word: string, place: number): string {
+  let seed = (2166136261 ^ (SALT + place)) >>> 0;
+  for (let i = 0; i < word.length; i++) seed = Math.imul(seed ^ word.charCodeAt(i), 16777619);
+  let out = "";
+  for (let i = 0; i < word.length; i++) {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    out += GLYPHS[(seed >>> 0) % GLYPHS.length];
+  }
+  return out;
+}
+
 function scrambleText(text: string): string {
   let place = 0;
-  return text.replace(/\S+/g, (word) => {
-    let seed = (2166136261 ^ (SALT + place++)) >>> 0;
-    for (let i = 0; i < word.length; i++) seed = Math.imul(seed ^ word.charCodeAt(i), 16777619);
-    let out = "";
-    for (let i = 0; i < word.length; i++) {
-      seed ^= seed << 13;
-      seed ^= seed >>> 17;
-      seed ^= seed << 5;
-      out += GLYPHS[(seed >>> 0) % GLYPHS.length];
-    }
-    return out;
-  });
+  return text.replace(/\S+/g, (word) => scrambleWord(word, place++));
 }
 
 /** For text that leaves React, such as a system notification. */
@@ -58,9 +60,40 @@ export function useStreamerText(text: string | null | undefined) {
   return on && text ? scrambleText(text) : text;
 }
 
+/** The text's words and the spaces between, each word with its scrambled stand-in. */
+function splitWords(text: string) {
+  const parts: { part: string; at: number; fake: string | null }[] = [];
+  let at = 0;
+  let place = 0;
+  for (const part of text.split(/(\s+)/)) {
+    const isWord = part !== "" && !/^\s/.test(part);
+    parts.push({ part, at, fake: isWord ? scrambleWord(part, place++) : null });
+    at += part.length;
+  }
+  return parts;
+}
+
 /** Content text (a title, a summary) that streamer mode scrambles and pixelates. */
 export function StreamerText({ text }: { readonly text: string }) {
-  return useStreamerMode() ? <span data-streamer-text="">{scrambleText(text)}</span> : text;
+  if (!useStreamerMode()) return text;
+  const parts = splitWords(text);
+  // Each scrambled word sits over its real word's invisible box, so lines wrap exactly as before.
+  return (
+    <span data-streamer-words="">
+      {parts.map(({ part, at, fake }) =>
+        fake === null ? (
+          part
+        ) : (
+          <span key={at} data-streamer-word="">
+            <span data-streamer-ghost="">{part}</span>
+            <span data-streamer-mask="" aria-hidden>
+              {fake}
+            </span>
+          </span>
+        ),
+      )}
+    </span>
+  );
 }
 
 /** The pixelate filter scrambled text is drawn through; mounted once while streamer mode is on. */

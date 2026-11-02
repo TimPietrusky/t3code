@@ -103,7 +103,12 @@ export function TicketReview() {
                   </strong>
                   <small>
                     {ticket.id} · {ticket.state}
-                    {ticket.who ? ` · ${ticket.who}` : ""}
+                    {ticket.who ? (
+                      <>
+                        {" · "}
+                        <Hidden text={ticket.who} />
+                      </>
+                    ) : null}
                   </small>
                   {expanded ? (
                     <span data-t3voice-ticket-detail="">

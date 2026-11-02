@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import "./streamer.css";
 
 // The app's side is ../streamerMode.tsx, which this folder may not import: same key, event and scramble.
 const STORE = "t3voice:streamer";
@@ -31,23 +32,51 @@ export function setStreamer(on: boolean) {
 const GLYPHS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const SALT = Math.floor(Math.random() * 0x7fffffff);
 
-function scramble(text: string): string {
-  let place = 0;
-  return text.replace(/\S+/g, (word) => {
-    let seed = (2166136261 ^ (SALT + place++)) >>> 0;
-    for (let i = 0; i < word.length; i++) seed = Math.imul(seed ^ word.charCodeAt(i), 16777619);
-    let out = "";
-    for (let i = 0; i < word.length; i++) {
-      seed ^= seed << 13;
-      seed ^= seed >>> 17;
-      seed ^= seed << 5;
-      out += GLYPHS[(seed >>> 0) % GLYPHS.length];
-    }
-    return out;
-  });
+function scrambleWord(word: string, place: number): string {
+  let seed = (2166136261 ^ (SALT + place)) >>> 0;
+  for (let i = 0; i < word.length; i++) seed = Math.imul(seed ^ word.charCodeAt(i), 16777619);
+  let out = "";
+  for (let i = 0; i < word.length; i++) {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    out += GLYPHS[(seed >>> 0) % GLYPHS.length];
+  }
+  return out;
 }
 
-/** Content text the app's streamer mode scrambles; the app's CSS pixelates `data-streamer-text`. */
+/** The text's words and the spaces between, each word with its scrambled stand-in. */
+function splitWords(text: string) {
+  const parts: { part: string; at: number; fake: string | null }[] = [];
+  let at = 0;
+  let place = 0;
+  for (const part of text.split(/(\s+)/)) {
+    const isWord = part !== "" && !/^\s/.test(part);
+    parts.push({ part, at, fake: isWord ? scrambleWord(part, place++) : null });
+    at += part.length;
+  }
+  return parts;
+}
+
+/** Content text streamer mode scrambles word by word and pixelates (streamer.css). */
 export function Hidden({ text }: { readonly text: string }) {
-  return useStreamer() ? <span data-streamer-text="">{scramble(text)}</span> : text;
+  if (!useStreamer()) return text;
+  const parts = splitWords(text);
+  // Each scrambled word sits over its real word's invisible box, so lines wrap exactly as before.
+  return (
+    <span data-streamer-words="">
+      {parts.map(({ part, at, fake }) =>
+        fake === null ? (
+          part
+        ) : (
+          <span key={at} data-streamer-word="">
+            <span data-streamer-ghost="">{part}</span>
+            <span data-streamer-mask="" aria-hidden>
+              {fake}
+            </span>
+          </span>
+        ),
+      )}
+    </span>
+  );
 }
