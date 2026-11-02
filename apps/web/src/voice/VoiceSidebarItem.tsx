@@ -5,11 +5,11 @@ import { SidebarMenuButton, SidebarMenuItem, useSidebar } from "../components/ui
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { voiceEnabled } from "./voiceOpen";
 
-/** Opens the voice page (voice-made UI and the bar) from the sidebar footer. */
+/** Opens the canvas (voice-made UI and the bar) from the sidebar footer. */
 export function VoiceSidebarItem() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
-  const active = useLocation({ select: (location) => location.pathname === "/voice" });
+  const active = useLocation({ select: (location) => location.pathname === "/canvas" });
   if (!voiceEnabled) return null;
   return (
     <SidebarMenuItem className="shrink-0">
@@ -17,19 +17,19 @@ export function VoiceSidebarItem() {
         <TooltipTrigger
           render={
             <SidebarMenuButton
-              aria-label="Voice"
+              aria-label="Canvas"
               isActive={active}
               size="icon"
               onClick={() => {
                 if (isMobile) setOpenMobile(false);
-                void navigate({ to: "/voice" });
+                void navigate({ to: "/canvas" });
               }}
             >
               <MicIcon />
             </SidebarMenuButton>
           }
         />
-        <TooltipPopup side="top">Voice</TooltipPopup>
+        <TooltipPopup side="top">Canvas</TooltipPopup>
       </Tooltip>
     </SidebarMenuItem>
   );

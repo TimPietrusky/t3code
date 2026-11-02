@@ -1,9 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { VoicePage } from "../voice/VoicePage";
-import { setVoiceOpen } from "../voice/voiceOpen";
-
+// The canvas lived at /voice first; old links and open tabs land there.
 export const Route = createFileRoute("/_chat/voice")({
-  component: VoicePage,
-  onEnter: () => setVoiceOpen(true),
+  beforeLoad: () => {
+    throw redirect({ to: "/canvas", replace: true });
+  },
 });

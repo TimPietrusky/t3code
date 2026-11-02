@@ -69,7 +69,7 @@ function followPublishedExtras(onLoad: (loaded: Loaded) => void): () => void {
 }
 
 /**
- * The voice page's extras layer. On the phone's production build it loads extras/ as its own
+ * The canvas's extras layer. On the phone's production build it loads extras/ as its own
  * bundle (extras.config.ts) and swaps in each newly published one, keeping the call running.
  */
 export function VoiceExtrasSlot() {
