@@ -11,13 +11,18 @@ const presence = NodePath.resolve(
 const out = NodePath.resolve(import.meta.dirname, "../apps/web/src/voice/presence");
 const ROOT = "[data-t3voice-presence]";
 
-// Presence's red HUD → green. Amber (her voice) and cyan (a thread) stay as they are.
+// Presence's red HUD → green, and her amber voice (the wave, the thinking beads, the speaking bars,
+// the listening wash) → green tones of the same lightness. Cyan (a thread) stays.
 const recolor = (text) =>
   text
     .replace(/255,\s*95,\s*85/g, "61, 255, 143")
     .replace(/255,\s*120,\s*105/g, "120, 255, 170")
     .replace(/#ff5f55/gi, "#3dff8f")
-    .replace(/#1b0806/gi, "#04170c");
+    .replace(/#1b0806/gi, "#04170c")
+    .replace(/255,\s*190,\s*140/g, "170, 255, 200")
+    .replace(/255,\s*160,\s*90/g, "80, 255, 150")
+    .replace(/255,\s*176,\s*110/g, "150, 255, 190")
+    .replace(/214,\s*150,\s*86/g, "86, 214, 140");
 
 const read = (path) => NodeFS.readFileSync(NodePath.join(presence, path), "utf8");
 const write = (name, text) => NodeFS.writeFileSync(NodePath.join(out, name), text);

@@ -40,8 +40,8 @@
 import { WAVE_N, WAVE_EASE, SCOPE_GAIN, bandsFrom, soften, scopeFrom } from "./wave.js";
 import { createAsciiLine } from "./asciiline.js";
 
-const AMB = "255,190,140";
-const GLOW = "rgba(255,160,90,.9)";
+const AMB = "170, 255, 200";
+const GLOW = "rgba(80, 255, 150,.9)";
 const RED = "120, 255, 170";
 const CYAN = "78,240,238";
 const HUD = "61, 255, 143";

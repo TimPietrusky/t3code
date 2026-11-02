@@ -100,7 +100,7 @@
   /* red/salmon is the HUD itself, cyan a thread, amber Presence's voice (the line's warm light) */
   --hud: #3dff8f; --hud-2: rgba(61, 255, 143, .66); --hud-3: rgba(61, 255, 143, .34); --hud-4: rgba(61, 255, 143, .13); --hud-ink: #04170c;
   --cyan: #4ef0ee; --cyan-2: rgba(78, 240, 238, .62); --cyan-3: rgba(78, 240, 238, .3);
-  --bar-amber: rgb(255, 176, 110);
+  --bar-amber: rgb(150, 255, 190);
   --font-tag: "Oxanium", var(--font-mono);
   --font-hud: "Rajdhani", var(--font-sans);
   /* the frame closed (its row: --bar-row inside the 1px edge), the wave's own height around its middle, the cut, the strip at the
@@ -175,7 +175,7 @@
 /* Listening's dim wash (KAL-1751): callwave.mjs sets its opacity, breathing with Tim's voice; the room clips it. */
 .bar-wash {
   position: absolute; inset: 0; opacity: 0; pointer-events: none; transform-origin: 50% 50%;
-  background: radial-gradient(farthest-side at 55% 55%, rgba(214, 150, 86, .26), rgba(214, 150, 86, .14) 55%, rgba(214, 150, 86, .05));
+  background: radial-gradient(farthest-side at 55% 55%, rgba(86, 214, 140, .26), rgba(86, 214, 140, .14) 55%, rgba(86, 214, 140, .05));
 }
 .bar-talk { position: absolute; inset: 0; z-index: 2; touch-action: manipulation; }
 .bar-talk, .bar-talk:focus, .bar-talk:focus-visible { outline: 0; border: 0; }
@@ -243,7 +243,7 @@
 .g-bars { display: inline-flex; align-items: center; gap: 2px; height: 9px; }
 .g-bars i { width: 2px; height: 50%; background: var(--hud); animation: g-bar 0.62s ease-in-out infinite alternate; }
 .g-bars i:nth-child(2) { animation-delay: -.21s; } .g-bars i:nth-child(3) { animation-delay: -.43s; } .g-bars i:nth-child(4) { animation-delay: -.11s; }
-.g-bars.amb i { background: var(--bar-amber); box-shadow: 0 0 4px rgba(255, 160, 90, .7); animation-duration: .5s; }
+.g-bars.amb i { background: var(--bar-amber); box-shadow: 0 0 4px rgba(80, 255, 150, .7); animation-duration: .5s; }
 @keyframes g-bar { from { height: 25%; } to { height: 100%; } }
 /* Driven by the real audio (callwave.mjs): Tim's microphone, her voice for the amber ones; a transform, no layout. */
 .g-bars[data-live] i { height: 100%; animation: none; transform: scaleY(.25); }
