@@ -91,10 +91,20 @@ def synthesize(text: str):
             lang_code="a",
             split_pattern=r"(?<=[.!?;:])\s+|\n+",
         ):
-            audio = np.clip(np.array(result.audio, dtype=np.float32), -1.0, 1.0)
+            audio = trim_silence(np.clip(np.array(result.audio, dtype=np.float32), -1.0, 1.0))
             yield (audio * 32767).astype("<i2").tobytes()
     finally:
         mx.clear_cache()
+
+
+def trim_silence(audio: np.ndarray, rate: int = 24_000) -> np.ndarray:
+    """Kokoro pads each sentence with ~0.4 s before and ~0.5 s after; that is pure latency here."""
+    loud = np.flatnonzero(np.abs(audio) > 0.015)
+    if loud.size == 0:
+        return audio
+    start = max(0, loud[0] - rate * 20 // 1000)
+    end = min(audio.size, loud[-1] + rate * 150 // 1000)
+    return audio[start:end]
 
 
 def pcm16_to_float(data: bytes) -> np.ndarray:

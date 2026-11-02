@@ -19,7 +19,8 @@ export function setSpeechEngine(engine: SpeechEngine): void {
   for (const listener of listeners) listener();
 }
 
-function subscribe(listener: () => void): () => void {
+/** Calls `listener` whenever the choice changes, in this tab or another. Returns the unsubscribe. */
+export function subscribeSpeechEngine(listener: () => void): () => void {
   listeners.add(listener);
   const onStorage = (event: StorageEvent) => {
     if (event.key === KEY) listener();
@@ -32,5 +33,5 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function useSpeechEngine(): SpeechEngine {
-  return useSyncExternalStore(subscribe, speechEngine);
+  return useSyncExternalStore(subscribeSpeechEngine, speechEngine);
 }

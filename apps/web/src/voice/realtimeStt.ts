@@ -3,7 +3,7 @@
  * via `/__t3voice/local/stt`. 16 kHz PCM streams only while Tim talks; a manual commit per utterance
  * returns its transcript. Without a socket, the same engine's batch endpoint takes it, never the other.
  */
-import { type SpeechEngine, speechEngine } from "./engine";
+import { type SpeechEngine, speechEngine, subscribeSpeechEngine } from "./engine";
 
 export const STT_SAMPLE_RATE = 16_000;
 
@@ -93,6 +93,8 @@ export class RealtimeStt {
   /** The engine of the open (or opening) socket and of the utterance in progress. */
   private engine: SpeechEngine = speechEngine();
   private ready: Promise<WebSocket> | null = null;
+  /** Switches the socket as soon as the engine choice changes, so the next utterance finds it open. */
+  private unsubscribe: (() => void) | null = null;
   private pending: PendingCommit[] = [];
   private closed = false;
   /** The current utterance, kept for the batch fallback. */
@@ -119,6 +121,8 @@ export class RealtimeStt {
 
   close(): void {
     this.closed = true;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
     for (const commit of this.pending) commit.reject(new Error("closed"));
     this.pending = [];
     this.socket?.close();
@@ -191,6 +195,7 @@ export class RealtimeStt {
   }
 
   private connect(): Promise<WebSocket> {
+    this.unsubscribe ??= subscribeSpeechEngine(() => this.warm());
     if (this.ready !== null) return this.ready;
     this.closed = false;
     const engine = this.engine;
