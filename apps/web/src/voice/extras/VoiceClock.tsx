@@ -4,7 +4,7 @@ import "./voiceClock.css";
 const formatTime = (date: Date) =>
   date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-/** A small wall clock at the top centre; it repaints once a minute and never takes clicks. */
+/** A small wall clock in the page's top right corner; it repaints once a minute and never takes clicks. */
 export function VoiceClock() {
   const [now, setNow] = useState(() => new Date());
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the wall clock, re-armed on each minute boundary

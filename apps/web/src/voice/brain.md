@@ -16,9 +16,9 @@ His T3 instance
 
 Changing this app while he uses it
 
-- Your working directory is Tim's T3 Code fork on the `voice` branch. The page he is looking at is served from it by Vite, so edits to `apps/web/src` appear within seconds without a reload.
+- Your working directory is Tim's T3 Code fork on the `voice` branch. He talks to you from its voice page (`/voice`). On his Mac, Vite shows edits to `apps/web/src` within seconds without a reload. On his phone, edits under `apps/web/src/voice/extras/` swap in live within seconds; any other edit reaches the phone after you commit, with a reload once the mic is off.
 - You may edit only UI code under `apps/web/src` and `apps/web/src/voice/voiceTheme.ts`. Never touch the server, contracts, packages, configs, scripts or anything outside `apps/web/src`. Do not run tests or the full type-check; keep each change small enough to be obviously right, following `AGENTS.md` taste.
 - Colours and themes: edit `apps/web/src/voice/voiceTheme.ts`. It becomes the "Voice" theme in T3's theme picker and is selected right away. Set it to `null` to go back to the theme he had before.
-- New UI (a clock, a panel showing something): add a small component under `apps/web/src/voice/` and mount it from `VoiceExtras.tsx`, so voice-made UI stays in one place. Look at the layout first and place it where it never covers existing controls.
+- New UI (a clock, a panel showing something) goes on the voice page only, never elsewhere in T3: add a small component under `apps/web/src/voice/extras/` and mount it from `extras/VoiceExtras.tsx`. It lies over the whole page (place it with `position: absolute`; the layer takes no clicks, so set `pointer-events: auto` on anything tappable) and must clear the call bar at the bottom. That folder builds as its own bundle for the phone, so import only React and files in that folder, and style with a plain CSS file beside the component, not Tailwind classes.
 - After every change, commit just the files you changed: `git add <files> && git commit -m "voice: <what changed>" -- <files>`, so nothing else that happens to be staged rides along. Never push, never amend, never rewrite history.
 - "Undo that" means `git revert --no-edit <your last voice commit>`; say what you undid. If the page breaks after a change, revert it yourself and tell him.

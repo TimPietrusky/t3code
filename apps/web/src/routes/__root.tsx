@@ -22,7 +22,6 @@ import { AddProjectToMachineDialogHost } from "../components/AddProjectToMachine
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { DevReplayHost } from "../components/DevReplayHost";
 import { PhoneBuildReload } from "../voice/PhoneBuildReload";
-import { VoiceHost } from "../voice/VoiceHost";
 import { FirstRunGate } from "../components/onboarding/FirstRunGate";
 import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
 import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstallDialog";
@@ -215,11 +214,6 @@ function RootRouteBranch() {
         <ProjectCloneToastCoordinator />
         <AddProjectToMachineDialogHost />
         {import.meta.env.DEV && primaryEnvironmentAuthenticated ? <DevReplayHost /> : null}
-        {/* t3 voice: dev, or the phone build (VITE_T3VOICE=1, scripts/t3voice.sh build). */}
-        {(import.meta.env.DEV || import.meta.env.VITE_T3VOICE === "1") &&
-        primaryEnvironmentAuthenticated ? (
-          <VoiceHost />
-        ) : null}
         {import.meta.env.VITE_T3VOICE === "1" && !import.meta.env.DEV ? <PhoneBuildReload /> : null}
         {primaryEnvironmentAuthenticated ? (
           <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />

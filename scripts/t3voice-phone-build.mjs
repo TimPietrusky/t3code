@@ -1,7 +1,7 @@
-// Keeps t3 voice's phone build current while the brain edits the UI: `vp build --watch` into a
-// staging folder, merged into apps/web/dist (hashed assets only added, so older pages still load
-// their chunks; index.html and t3voice-build.json swapped atomically). PhoneBuildReload.tsx reloads
-// the page on a new build id.
+// Keeps t3 voice's phone build current: `vp build --watch` merged into apps/web/dist (hashed assets
+// only added, so older pages still load their chunks); PhoneBuildReload.tsx reloads on a new build
+// id. The voice page's extras build separately into dist/t3voice-extras, published on every build:
+// VoiceExtrasSlot swaps them in without a reload.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -10,6 +10,8 @@ const root = NodePath.resolve(import.meta.dirname, "..");
 const web = NodePath.join(root, "apps/web");
 const dist = NodePath.resolve(process.env.T3VOICE_PHONE_STATIC ?? NodePath.join(web, "dist"));
 const stage = NodePath.join(web, "node_modules/.t3voice-stage");
+const extrasStage = NodePath.join(web, "node_modules/.t3voice-extras-stage");
+const extrasDist = NodePath.join(dist, "t3voice-extras");
 
 const log = (message) => console.log(`${new Date().toISOString()} ${message}`);
 
@@ -128,11 +130,59 @@ build.stdout.on("data", onOutput);
 build.stderr.on("data", onOutput);
 build.on("exit", (code) => {
   log(`vp build --watch exited (${code}); launchd restarts it`);
+  extras.kill("SIGTERM");
+  process.exit(code ?? 1);
+});
+
+// Extras swap in live, so each finished build goes out at once; a failed one leaves the last.
+function publishExtras() {
+  NodeFS.mkdirSync(extrasDist, { recursive: true });
+  replaceAtomically(
+    NodePath.join(extrasStage, "extras.js"),
+    NodePath.join(extrasDist, "extras.js"),
+  );
+  const css = NodeFS.existsSync(NodePath.join(extrasStage, "extras.css"));
+  if (css) {
+    replaceAtomically(
+      NodePath.join(extrasStage, "extras.css"),
+      NodePath.join(extrasDist, "extras.css"),
+    );
+  }
+  const id = `${Date.now()}`;
+  const version = NodePath.join(extrasDist, "build.json");
+  NodeFS.writeFileSync(`${version}.next`, JSON.stringify({ id, css }));
+  NodeFS.renameSync(`${version}.next`, version);
+  log(`published extras ${id}`);
+}
+const extras = NodeChildProcess.spawn(
+  NodePath.join(root, "node_modules/.bin/vp"),
+  ["build", "--watch", "--config", "src/voice/extras.config.ts", "--outDir", extrasStage],
+  { cwd: web, env: { ...process.env, VITE_T3VOICE: "1" }, stdio: ["ignore", "pipe", "pipe"] },
+);
+function onExtrasOutput(chunk) {
+  for (const line of String(chunk).split("\n")) {
+    if (/built in [\d.]+\s*m?s/i.test(line)) {
+      try {
+        publishExtras();
+      } catch (error) {
+        log(`extras publish failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } else if (/\bError\b|\[error\]|failed to|may import only/.test(line)) {
+      log(`extras: ${line.trim()}`);
+    }
+  }
+}
+extras.stdout.on("data", onExtrasOutput);
+extras.stderr.on("data", onExtrasOutput);
+extras.on("exit", (code) => {
+  log(`extras build --watch exited (${code}); launchd restarts it`);
+  build.kill("SIGTERM");
   process.exit(code ?? 1);
 });
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.on(signal, () => {
     build.kill(signal);
+    extras.kill(signal);
     process.exit(0);
   });
 }

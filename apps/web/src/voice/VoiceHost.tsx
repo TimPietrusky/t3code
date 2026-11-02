@@ -16,9 +16,7 @@ import { markBriefed, needsBrief, withBrief } from "./brief";
 import { speechEngine, useSpeechEngine } from "./engine";
 import { type VoicePhase, VoiceSession } from "./speech";
 import { takeSentences } from "./speechText";
-import { useComposerClearance } from "./useComposerClearance";
 import { VoiceBar, type VoiceBarState } from "./VoiceBar";
-import { VoiceExtras } from "./VoiceExtras";
 import { endVoiceLogSession, startVoiceLogSession, voiceLog } from "./voiceLog";
 import { syncVoiceTheme } from "./voiceThemeSync";
 
@@ -343,9 +341,7 @@ export function VoiceHost() {
     };
   }, []);
 
-  const composer = useComposerClearance();
-
-  if (config === null) return <VoiceExtras />;
+  if (config === null) return null;
 
   // ElevenLabs needs the key in the dev server; local speech needs its service up.
   const unavailable =
@@ -365,25 +361,20 @@ export function VoiceHost() {
           : phase;
 
   return (
-    <>
-      <VoiceExtras />
-      <VoiceBar
-        state={state}
-        message={message}
-        disabled={engine === "elevenlabs" && !config.speech}
-        label={
-          phase === "off"
-            ? "Start voice (Ctrl+Option+V)"
-            : phase === "speaking"
-              ? "Stop the reply"
-              : "Stop voice (Ctrl+Option+V)"
-        }
-        bottom={composer.clearance}
-        column={composer.column}
-        onPress={() => void toggle()}
-        analysis={() => sessionRef.current?.analysis() ?? null}
-        stoppedAt={stoppedAt}
-      />
-    </>
+    <VoiceBar
+      state={state}
+      message={message}
+      disabled={engine === "elevenlabs" && !config.speech}
+      label={
+        phase === "off"
+          ? "Start voice (Ctrl+Option+V)"
+          : phase === "speaking"
+            ? "Stop the reply"
+            : "Stop voice (Ctrl+Option+V)"
+      }
+      onPress={() => void toggle()}
+      analysis={() => sessionRef.current?.analysis() ?? null}
+      stoppedAt={stoppedAt}
+    />
   );
 }

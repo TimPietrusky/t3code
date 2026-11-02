@@ -1,0 +1,11 @@
+/* The voice page: the call frame sits at the bottom of the page, not the window, so an open
+   sidebar never covers it; voice-made UI lies over the whole page. */
+[data-t3voice-page] [data-t3voice-presence] .bar {
+  position: absolute;
+  width: min(780px, calc(100% - 2 * var(--grid-edge)));
+}
+[data-t3voice-extras] {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}

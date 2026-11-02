@@ -1,11 +1,4 @@
-import {
-  type CSSProperties,
-  type ReactNode,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { type CallWaveLevels, type CallWaveSpectrum, createCallWave } from "./presence/callwave";
@@ -49,17 +42,14 @@ const REST_MS = 100;
 /**
  * The voice control: Presence's call frame itself (presence/, copied by
  * scripts/t3voice-presence-sync.mjs, green instead of red), driven by t3 voice's state and audio.
- * The room is the one tap target; `toggle` sits in a tab on the top edge. `bottom` lifts it over a
- * pinned composer; `column` gives it the composer's left and right edges (voiceBar.css).
+ * The room is the one tap target (no key: T3's composer is right there); `toggle` sits in a small
+ * tab on the top edge.
  */
 export function VoiceBar(props: {
   readonly state: VoiceBarState;
   readonly message: string | null;
   readonly disabled: boolean;
   readonly label: string;
-  readonly bottom: number;
-  /** The composer's column (viewport px); null keeps Presence's own centred bar. */
-  readonly column: { readonly left: number; readonly width: number } | null;
   readonly onPress: () => void;
   /** Small controls for the slot tab on the top edge. */
   readonly toggle?: ReactNode;
@@ -146,14 +136,6 @@ export function VoiceBar(props: {
     if (props.stoppedAt) frameRef.current?.stopped();
   }, [props.stoppedAt]);
 
-  // Presence lifts its bar with --kb; its frame sits ~18px above the bar's own bottom.
-  const lift = Math.max(0, props.bottom - 18);
-  const style: Record<string, string> = {};
-  if (lift > 0) style["--kb"] = `${lift}px`;
-  if (props.column !== null) {
-    style["--t3voice-col-left"] = `${props.column.left}px`;
-    style["--t3voice-col-width"] = `${props.column.width}px`;
-  }
   return (
     <>
       <div
@@ -161,8 +143,6 @@ export function VoiceBar(props: {
         data-t3voice-presence=""
         // PhoneBuildReload reads this: no reload unless voice is off.
         data-voice-state={props.state}
-        data-t3voice-column={props.column === null ? undefined : ""}
-        style={style as CSSProperties}
       />
       {slot !== null
         ? createPortal(
