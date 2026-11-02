@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { MicIcon } from "lucide-react";
+import { PresentationIcon } from "lucide-react";
 
 import { SidebarMenuButton, SidebarMenuItem, useSidebar } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
@@ -25,7 +25,7 @@ export function VoiceSidebarItem() {
                 void navigate({ to: "/canvas" });
               }}
             >
-              <MicIcon />
+              <PresentationIcon />
             </SidebarMenuButton>
           }
         />
