@@ -1,5 +1,7 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Vite config runs before any Effect runtime.
 import * as NodePath from "node:path";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- starts the local speech service, outside any Effect runtime.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeNet from "node:net";
 import type { Connect, Plugin } from "vite-plus";
 
@@ -110,6 +112,20 @@ async function transcribeLocal(audio: Buffer, contentType: string): Promise<stri
   return typeof body.text === "string" ? body.text.trim() : "";
 }
 
+// Picking local AI starts the service if it is not up (detached, so it outlives Vite restarts).
+// It loads in ~10 s; a start that has not answered within STARTING_MS reports "down".
+const STARTING_MS = 45_000;
+const START_AGAIN_AFTER_MS = 5 * 60_000;
+let lastStartAt = 0;
+function startingLocalSpeech(): boolean {
+  if (Date.now() - lastStartAt >= START_AGAIN_AFTER_MS) {
+    lastStartAt = Date.now();
+    const script = NodePath.join(workspaceRoot, "scripts/t3voice-speech.sh");
+    NodeChildProcess.spawn(script, ["start"], { detached: true, stdio: "ignore" }).unref();
+  }
+  return Date.now() - lastStartAt < STARTING_MS;
+}
+
 const localError = (error: unknown): string =>
   error instanceof Error && error.message === LOCAL_DOWN ? LOCAL_DOWN : describe(error);
 
@@ -158,7 +174,10 @@ export function t3VoicePlugin(): Plugin {
           if (body.ready === true) sendJson(res, 200, { ready: true });
           else sendJson(res, 503, { error: "Local speech is still loading its models" });
         })
-        .catch(() => sendJson(res, 503, { error: LOCAL_DOWN }));
+        .catch(() => {
+          const error = startingLocalSpeech() ? "Local speech is starting…" : LOCAL_DOWN;
+          sendJson(res, 503, { error });
+        });
       return;
     }
 
