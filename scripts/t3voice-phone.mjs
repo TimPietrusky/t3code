@@ -5,6 +5,13 @@ import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 
 const listenPort = Number(process.env.T3VOICE_PHONE_PORT ?? 5791);
+// Loopback for `netbird expose`; a persistent NetBird service reaches the Mac's NetBird address
+// instead, like Presence. Only NetBird addresses (100.64.0.0/10), never a wildcard, LAN or public one.
+const listenHost = process.env.T3VOICE_PHONE_BIND?.trim() || "127.0.0.1";
+const [first, second] = listenHost.split(".").map(Number);
+if (listenHost !== "127.0.0.1" && !(first === 100 && second >= 64 && second <= 127)) {
+  throw new Error(`T3VOICE_PHONE_BIND=${listenHost} refused: only a NetBird address may be bound`);
+}
 const targetPort = Number(process.env.T3VOICE_PORT ?? 5790);
 const REFUSED = [/^\/mcp(?:[/?]|$)/, /^\/oauth(?:[/?]|$)/, /^\/\.well-known\/oauth/];
 
@@ -63,6 +70,8 @@ server.on("upgrade", (req, socket, head) => {
   socket.on("error", () => upstream.destroy());
 });
 
-server.listen(listenPort, "127.0.0.1", () => {
-  console.log(`t3 voice phone front door on 127.0.0.1:${listenPort} -> 127.0.0.1:${targetPort}`);
+server.listen(listenPort, listenHost, () => {
+  console.log(
+    `t3 voice phone front door on ${listenHost}:${listenPort} -> 127.0.0.1:${targetPort}`,
+  );
 });

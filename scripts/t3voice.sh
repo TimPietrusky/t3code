@@ -39,22 +39,37 @@ if [ "${1:-}" = "pair" ]; then
 fi
 
 if [ "${1:-}" = "phone" ]; then
-  # The phone reaches a loopback front door through NetBird's reverse proxy, behind NetBird SSO
-  # for one group; nothing listens on the NetBird or LAN address. Ctrl+C takes the URL down.
+  # Publishes the client for a phone behind NetBird SSO, then writes the URL to
+  # /tmp/t3voice/public-origin and a phone pairing link to /tmp/t3voice/pair-link.txt.
+  #   default: `netbird expose` of a loopback front door (URL changes on every restart)
+  #   T3VOICE_PUBLIC_ORIGIN=https://<service>: a persistent NetBird service targeting this Mac's
+  #   NetBird IP on $T3VOICE_PHONE_PORT; the front door binds that address only, like Presence.
+  # The front door refuses MCP and OAuth. Ctrl+C takes it down.
   group="${T3VOICE_NETBIRD_GROUP:-kale-board-tim}"
   phone_port="${T3VOICE_PHONE_PORT:-5791}"
-  T3VOICE_PHONE_PORT="$phone_port" T3VOICE_PORT="$PORT" node "$ROOT/scripts/t3voice-phone.mjs" &
+  mkdir -p /tmp/t3voice && rm -f /tmp/t3voice/public-origin
+  bind=127.0.0.1
+  if [ -n "${T3VOICE_PUBLIC_ORIGIN:-}" ]; then
+    bind="$(netbird status | sed -n 's/^NetBird IP: \([0-9.]*\).*/\1/p')"
+    [ -n "$bind" ] || { echo "NetBird is not connected." >&2; exit 1; }
+  fi
+  T3VOICE_PHONE_BIND="$bind" T3VOICE_PHONE_PORT="$phone_port" T3VOICE_PORT="$PORT" node "$ROOT/scripts/t3voice-phone.mjs" &
   front=$!
   trap 'kill $front 2>/dev/null' EXIT
-  mkdir -p /tmp/t3voice && rm -f /tmp/t3voice/public-origin
+  publish() {
+    printf '%s\n' "$1" > /tmp/t3voice/public-origin
+    T3VOICE_PUBLIC_ORIGIN="$1" "$ROOT/scripts/t3voice.sh" pair
+  }
+  if [ -n "${T3VOICE_PUBLIC_ORIGIN:-}" ]; then
+    publish "$T3VOICE_PUBLIC_ORIGIN"
+    wait "$front"
+    exit 0
+  fi
   netbird expose "$phone_port" --with-name-prefix t3-voice --with-user-groups "$group" 2>&1 |
     while IFS= read -r line; do
       echo "$line"
       url="$(printf '%s' "$line" | grep -o 'https://[A-Za-z0-9.-]*' | head -1 || true)"
-      if [ -n "$url" ] && [ ! -s /tmp/t3voice/public-origin ]; then
-        printf '%s\n' "$url" > /tmp/t3voice/public-origin
-        T3VOICE_PUBLIC_ORIGIN="$url" "$ROOT/scripts/t3voice.sh" pair
-      fi
+      [ -n "$url" ] && [ ! -s /tmp/t3voice/public-origin ] && publish "$url"
     done
   exit 0
 fi
