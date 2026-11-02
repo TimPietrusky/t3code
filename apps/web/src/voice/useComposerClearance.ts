@@ -5,10 +5,12 @@ import { observeResize } from "~/lib/observeResize";
 
 const COMPOSER = 'form[data-chat-composer-form="true"]';
 const GAP_PX = 8;
+// The voice bar's width plus its edge on wide screens (voiceBar.css).
+const CONTROL_WIDTH_PX = 340;
 
 /**
- * On a phone the chat composer is pinned to the bottom edge, where the voice control floats.
- * Returns how far above the bottom the control must sit to clear it (0 when nothing is pinned).
+ * The chat composer can be pinned to the bottom edge, where the voice control floats (always on a
+ * phone). Returns how far above the bottom the control must sit to clear it (0 when it is clear).
  */
 export function useComposerClearance(): number {
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -27,10 +29,13 @@ export function useComposerClearance(): number {
         stopObserving = form === null ? () => {} : observeResize(form, measure);
         observed = form;
       }
-      if (!narrow.matches || form === null) return setClearance(0);
+      if (form === null) return setClearance(0);
       const viewport = window.visualViewport?.height ?? window.innerHeight;
       const rect = form.getBoundingClientRect();
-      setClearance(rect.bottom > viewport - 80 ? Math.ceil(viewport - rect.top) + GAP_PX : 0);
+      const pinned = rect.bottom > viewport - 80;
+      // On a wide screen the control sits in the bottom-right corner, clear of a centered composer.
+      const overlaps = narrow.matches || rect.right > window.innerWidth - CONTROL_WIDTH_PX;
+      setClearance(pinned && overlaps ? Math.ceil(viewport - rect.top) + GAP_PX : 0);
     }
     // The composer mounts a moment after the route changes.
     const timers = [0, 400, 1_500].map((delay) => window.setTimeout(measure, delay));

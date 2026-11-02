@@ -4,7 +4,6 @@ import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { MicIcon, MicOffIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { newMessageId, newThreadId } from "~/lib/utils";
@@ -13,11 +12,11 @@ import { usePrimaryEnvironmentId } from "../state/environments";
 import { primaryServerSettingsAtom } from "../state/server";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
-import { Button } from "../components/ui/button";
 import { markBriefed, needsBrief, withBrief } from "./brief";
 import { type VoicePhase, VoiceSession } from "./speech";
 import { takeSentences } from "./speechText";
 import { useComposerClearance } from "./useComposerClearance";
+import { VoiceBar, type VoiceBarState } from "./VoiceBar";
 import { VoiceExtras } from "./VoiceExtras";
 import { syncVoiceTheme } from "./voiceThemeSync";
 
@@ -31,14 +30,6 @@ type VoiceConfig = {
   readonly workspaceRoot: string;
   /** T3VOICE_MODEL: a model for new voice threads instead of the default model's. */
   readonly model: string | null;
-};
-
-const PHASE_LABEL: Record<VoicePhase, string> = {
-  off: "",
-  listening: "Listening",
-  hearing: "Hearing you",
-  transcribing: "Got it",
-  speaking: "Speaking",
 };
 
 /**
@@ -250,48 +241,30 @@ export function VoiceHost() {
 
   if (config === null) return <VoiceExtras />;
 
-  const label =
-    error ??
-    (!config.speech
-      ? "Voice needs scripts/t3voice.sh"
+  const state: VoiceBarState =
+    error !== null || !config.speech
+      ? "error"
       : phase === "listening" && thinking
-        ? "Thinking"
-        : PHASE_LABEL[phase]);
+        ? "thinking"
+        : phase;
 
   return (
     <>
       <VoiceExtras />
-      <div
-        className="pointer-events-none fixed right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-50 flex items-center gap-2"
-        style={clearance > 0 ? { bottom: clearance } : undefined}
-      >
-        {label ? (
-          <span
-            data-t3voice-label
-            className="max-w-72 truncate rounded-full border bg-popover px-2.5 py-1 text-xs text-muted-foreground shadow-xs"
-          >
-            {label}
-          </span>
-        ) : null}
-        <div className="pointer-events-auto">
-          <Button
-            variant={phase === "off" ? "outline" : "default"}
-            size="icon-xl"
-            aria-label={
-              phase === "off"
-                ? "Start voice (Ctrl+Option+V)"
-                : phase === "speaking"
-                  ? "Stop the reply"
-                  : "Stop voice"
-            }
-            title={phase === "off" ? "Talk to T3 (Ctrl+Option+V)" : "Stop voice (Ctrl+Option+V)"}
-            disabled={!config.speech}
-            onClick={() => void toggle()}
-          >
-            {phase === "off" ? <MicOffIcon /> : <MicIcon />}
-          </Button>
-        </div>
-      </div>
+      <VoiceBar
+        state={state}
+        message={error ?? (config.speech ? null : "Voice needs scripts/t3voice.sh")}
+        disabled={!config.speech}
+        label={
+          phase === "off"
+            ? "Start voice (Ctrl+Option+V)"
+            : phase === "speaking"
+              ? "Stop the reply"
+              : "Stop voice (Ctrl+Option+V)"
+        }
+        bottom={clearance}
+        onPress={() => void toggle()}
+      />
     </>
   );
 }
