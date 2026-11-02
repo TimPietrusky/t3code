@@ -61,9 +61,14 @@ const MIN_LONE_WORD_MS = 500;
  * How long after the gate closes (its own HOLD_MS of quiet, ~0.7 s, already past) Tim's turn ends,
  * by how his words so far end: a finished sentence ends soon, a pause after "and" or "um" waits.
  */
-const END_AFTER_SENTENCE_MS = 300;
-const END_OPEN_MS = 800;
-const END_HESITATION_MS = 1_500;
+// A turn ends only after real silence, however long Tim talks (2 Nov: "never end my turn while I'm
+// still speaking"): the gate's ~0.7 s hold, then this long with the mic near the room's floor and no
+// new words. ~1.8 s after a finished sentence, ~2.3 s mid-sentence, ~3 s after "um" or "and".
+const END_AFTER_SENTENCE_MS = 1_100;
+const END_OPEN_MS = 1_600;
+const END_HESITATION_MS = 2_300;
+// Quiet means within this many dB of the room's floor: his soft trailing words are not.
+const QUIET_OVER_FLOOR_DB = 8;
 const HESITATION =
   /(?:,|\b(?:um+|uh+|er+|erm|and|but|so|or|because|cause|like|the|a|an|to|of|for|with|that|which|if|when|then|i|my|your|is|are|was|were|we|you|it)\s*)$/i;
 // Backchannels never cut a reply off (ElevenLabs' interruption ignore terms, which Presence uses).
@@ -131,6 +136,8 @@ function asciiPunctuation(text: string): string {
 }
 
 /** How long to wait after the gate closed before Tim's turn ends, from his words so far. */
+const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
+
 function endpointWait(partial: string): { readonly ms: number; readonly rule: string } {
   const text = asciiPunctuation(partial).trim();
   if (text === "") return { ms: END_OPEN_MS, rule: "no-words-yet" };
@@ -148,10 +155,6 @@ function interruptingWords(heard: string, spoken: ReadonlyArray<string>): Readon
 }
 
 /**
- * Whether a transcript taken while the reply played has Tim in it: a run of his words, and enough
- * of them. A long transcript of our own echo always has a few garbled words; Tim's are a real share.
- */
-/**
  * While a reply is on hold and the gate opened on Tim: one word of his that is not our echo nor
  * "mm-hmm" stops it. A hold alone (voiced, not open) never stops anything: loud echo gets that far.
  */
@@ -159,6 +162,10 @@ function isTakeover(heard: string, spoken: ReadonlyArray<string>): boolean {
   return !isNoisePhrase(heard) && interruptingWords(heard, spoken).length >= 1;
 }
 
+/**
+ * Whether a transcript taken while the reply played has Tim in it: a run of his words, and enough
+ * of them. A long transcript of our own echo always has a few garbled words; Tim's are a real share.
+ */
 function isInterruption(heard: string, spoken: ReadonlyArray<string>): boolean {
   const all = heard.toLowerCase().match(/\p{L}[\p{L}'’]*|\d+/gu) ?? [];
   if (isNoisePhrase(heard)) return false;
@@ -193,6 +200,8 @@ export class VoiceSession {
   private inSpeech = false;
   private speechMs = 0;
   private closedMs = 0;
+  /** The room's level as the gate measures it (dB). */
+  private floorDb = -60;
   private utteranceStartedAt = 0;
   private partial = "";
   private partials = 0;
@@ -374,6 +383,7 @@ export class VoiceSession {
       now < this.ignoreGateUntil
         ? null
         : this.gate.step(10 * Math.log10(level * level + 1e-12), mode, FRAME_MS);
+    if (decision) this.floorDb = decision.floor;
     if (decision?.opened || decision?.closed) {
       voiceLog("voice", decision.opened ? "gate.open" : "gate.close", {
         mode,
@@ -462,7 +472,11 @@ export class VoiceSession {
 
     this.stt.push(pcm);
     this.speechMs += FRAME_MS;
-    this.closedMs = this.gate.open ? 0 : this.closedMs + FRAME_MS;
+    const quiet =
+      !this.gate.open &&
+      !this.gate.voiced &&
+      20 * Math.log10(level + 1e-9) < this.floorDb + QUIET_OVER_FLOOR_DB;
+    this.closedMs = quiet ? this.closedMs + FRAME_MS : 0;
     const wait = endpointWait(this.partial);
     if (this.closedMs >= wait.ms) {
       voiceLog("voice", "turn.end", {
@@ -514,6 +528,8 @@ export class VoiceSession {
 
   private onPartial(text: string): void {
     if (this.inSpeech) {
+      // New words are Tim still talking, whatever the level says.
+      if (wordCount(text) > wordCount(this.partial)) this.closedMs = 0;
       this.partial = text;
       this.partials += 1;
       return;

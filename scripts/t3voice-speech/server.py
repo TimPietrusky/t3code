@@ -9,7 +9,8 @@ t3 voice dev server (`/__t3voice/local/*`), never directly.
   WS   /stt/stream   ElevenLabs Scribe realtime's message shapes: input_audio_chunk in (base64
                      16 kHz PCM, `commit`), session_started ({"vad"}) / partial_transcript /
                      committed_transcript ({"speech_s"}) out. Partials re-transcribe the open
-                     segment. Silero VAD runs first: no speech, no transcript.
+                     segment's last 20 s; a commit all of it. Silero VAD runs first: no
+                     speech, no transcript.
 
 Start with scripts/t3voice-speech.sh, which owns the venv and the model cache.
 """
@@ -39,7 +40,11 @@ VOICE = os.environ.get("T3VOICE_LOCAL_VOICE", "af_heart")
 SPEED = float(os.environ.get("T3VOICE_LOCAL_SPEED", "1.0"))
 PORT = int(os.environ.get("T3VOICE_LOCAL_PORT", "5797"))
 STT_RATE = 16_000
-MAX_SEGMENT_S = 60
+# An utterance is kept whole, no length limit (2 Nov: a 108 s turn lost its first 48 s to a 60 s
+# cap). Commits transcribe it in 30 s chunks, joined in order; partials only its last 20 s.
+CHUNK_S = 30.0
+CHUNK_OVERLAP_S = 2.0
+PARTIAL_WINDOW_S = 20
 PARTIAL_EVERY_S = 0.25
 MIN_PARTIAL_S = 0.4
 MAX_TTS_CHARS = 1_200
@@ -98,8 +103,10 @@ def speech_frames(samples: np.ndarray) -> np.ndarray | None:
     return np.array(vad.predict_proba(samples, sample_rate=STT_RATE)).reshape(-1) > VAD_THRESHOLD
 
 
-def transcribe_pcm(samples: np.ndarray) -> tuple[str, float | None]:
+def transcribe_pcm(samples: np.ndarray, window_s: float | None = None) -> tuple[str, float | None]:
     """Text and seconds of speech Silero found (None without it). Only speech gets a transcript."""
+    if window_s is not None and samples.size > window_s * STT_RATE:
+        samples = samples[-int(window_s * STT_RATE) :]
     if samples.size < STT_RATE // 10:
         return "", 0.0
     speech = speech_frames(samples)
@@ -107,7 +114,12 @@ def transcribe_pcm(samples: np.ndarray) -> tuple[str, float | None]:
     if speech_s is not None and speech_s < MIN_SPEECH_S:
         return "", speech_s
     try:
-        result = models["stt"].generate(mx.array(samples))
+        long = samples.size > CHUNK_S * STT_RATE
+        result = models["stt"].generate(
+            mx.array(samples),
+            chunk_duration=CHUNK_S if long else None,
+            overlap_duration=CHUNK_OVERLAP_S if long else None,
+        )
     finally:
         mx.clear_cache()
     text = result.text.strip()
@@ -232,7 +244,7 @@ async def stt_stream(socket: WebSocket):
     generation = 0
 
     async def send_partial(audio: np.ndarray, of_generation: int) -> None:
-        text, _speech_s = await loop.run_in_executor(gpu, transcribe_pcm, audio)
+        text, _speech_s = await loop.run_in_executor(gpu, transcribe_pcm, audio, PARTIAL_WINDOW_S)
         # A partial that finishes after its segment was committed would mislabel the next one.
         if text and of_generation == generation:
             await socket.send_json({"message_type": "partial_transcript", "text": text})
@@ -248,8 +260,6 @@ async def stt_stream(socket: WebSocket):
             segment.append(chunk)
             samples += chunk.size
             since_partial += chunk.size
-            while samples > MAX_SEGMENT_S * STT_RATE and len(segment) > 1:
-                samples -= segment.pop(0).size
             if message.get("commit"):
                 audio = np.concatenate(segment) if segment else np.zeros(0, np.float32)
                 segment, samples, since_partial = [], 0, 0
@@ -264,7 +274,8 @@ async def stt_stream(socket: WebSocket):
                 and (partial is None or partial.done())
             ):
                 since_partial = 0
-                partial = asyncio.create_task(send_partial(np.concatenate(segment), generation))
+                recent = np.concatenate(segment[-int(PARTIAL_WINDOW_S * STT_RATE / 1600) - 1 :])
+                partial = asyncio.create_task(send_partial(recent, generation))
     except (WebSocketDisconnect, RuntimeError):
         pass
 

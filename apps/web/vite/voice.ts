@@ -17,7 +17,8 @@ const LOCAL_PORT = Number(process.env.T3VOICE_LOCAL_PORT?.trim() || 5797);
 const LOCAL = `http://127.0.0.1:${LOCAL_PORT}`;
 const LOCAL_DOWN = "Local speech down · run t3voice-speech.sh";
 const PREFIX = "/__t3voice";
-const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+// No length limit on what Tim says: 1 GiB is ~9 h of 16 kHz speech.
+const MAX_AUDIO_BYTES = 1024 * 1024 * 1024;
 const MAX_TTS_CHARS = 1_200;
 
 const voiceKey = () =>
