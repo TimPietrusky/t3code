@@ -2,19 +2,19 @@ import { useEffect, useState } from "react";
 import "./voiceClock.css";
 
 const formatTime = (date: Date) =>
-  date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-/** A small wall clock in the page's top right corner; it repaints once a minute and never takes clicks. */
+/** A small wall clock in the page's top right corner; it repaints once a second and never takes clicks. */
 export function VoiceClock() {
   const [now, setNow] = useState(() => new Date());
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the wall clock, re-armed on each minute boundary
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the wall clock, re-armed on each second boundary
   useEffect(() => {
-    const untilNextMinute = () => 60_000 - (Date.now() % 60_000);
+    const untilNextSecond = () => 1000 - (Date.now() % 1000);
     const tick = () => {
       setNow(new Date());
-      id = window.setTimeout(tick, untilNextMinute());
+      id = window.setTimeout(tick, untilNextSecond());
     };
-    let id = window.setTimeout(tick, untilNextMinute());
+    let id = window.setTimeout(tick, untilNextSecond());
     return () => window.clearTimeout(id);
   }, []);
   return (
