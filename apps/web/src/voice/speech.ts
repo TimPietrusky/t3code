@@ -220,6 +220,8 @@ export class VoiceSession {
   private strongVoiceAt = 0;
   private rejectedInSegment = false;
   private pendingTranscriptions = 0;
+  /** Reply sentences held back while Tim has the floor. */
+  private waiting: string[] = [];
   private phase: VoicePhase = "off";
   /** Chosen as each utterance starts; its reply is spoken with the same engine. */
   private engine: SpeechEngine = speechEngine();
@@ -317,6 +319,7 @@ export class VoiceSession {
   };
 
   stop(): void {
+    this.waiting = [];
     this.player?.stop("call ended");
     this.player?.dispose();
     document.removeEventListener("touchend", this.onTouch);
@@ -337,7 +340,19 @@ export class VoiceSession {
   /** Queues one sentence of a reply; empty or markdown-only text stays silent. */
   speak(text: string): void {
     const spoken = speakableText(text);
-    if (spoken !== "") this.player?.speak(spoken);
+    if (spoken === "") return;
+    // Never over Tim: a reply that arrives while he talks (or his words are still being written
+    // down) waits until his turn is over (2 Nov: a reply woken by another thread talked over him).
+    if (this.timHasTheFloor() || this.waiting.length > 0) {
+      if (this.waiting.length === 0) voiceLog("voice", "say.waiting", { text: spoken });
+      this.waiting.push(spoken);
+      return;
+    }
+    this.player?.speak(spoken);
+  }
+
+  private timHasTheFloor(): boolean {
+    return this.inSpeech || this.gate.open || this.pendingTranscriptions > 0;
   }
 
   /**
@@ -364,10 +379,16 @@ export class VoiceSession {
 
   /** Drops a queued sentence that has not started playing (the hold line when the real one lands). */
   cancelQueued(text: string): boolean {
+    const waiting = this.waiting.indexOf(text);
+    if (waiting >= 0) {
+      this.waiting.splice(waiting, 1);
+      return true;
+    }
     return this.player?.drop(text) ?? false;
   }
 
   stopSpeaking(reason = "tap"): void {
+    this.waiting = [];
     this.player?.stop(reason);
   }
 
@@ -376,6 +397,11 @@ export class VoiceSession {
     const player = this.player;
     if (player === null) return;
     const now = performance.now();
+    if (this.waiting.length > 0 && !this.timHasTheFloor()) {
+      voiceLog("voice", "say.released", { sentences: this.waiting.length });
+      for (const sentence of this.waiting) player.speak(sentence);
+      this.waiting = [];
+    }
     // The reply is heard while it plays, between its sentences and for its echo's tail.
     const replyAudible = player.speaking || now < player.audibleUntil + ECHO_TAIL_MS;
     const mode: CloseTalkMode = replyAudible ? "speak" : this.thinking ? "think" : "listen";
