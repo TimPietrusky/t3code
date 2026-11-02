@@ -8,21 +8,24 @@
 #   scripts/t3voice-speech.sh stop     stop the one started in the background
 #
 # The venv and the models (~1.5 GB, downloaded once) live in $T3VOICE_SPEECH_HOME
-# (default ~/.cache/t3voice). Logs: /tmp/t3voice/speech.log.
+# (default ~/.cache/t3voice). Logs: /tmp/t3voice-speech/speech.log (apart from /tmp/t3voice).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HERE="$ROOT/scripts/t3voice-speech"
 HOME_DIR="${T3VOICE_SPEECH_HOME:-$HOME/.cache/t3voice}"
 PORT="${T3VOICE_LOCAL_PORT:-5797}"
-PID_FILE=/tmp/t3voice/speech.pid
-LOG_FILE=/tmp/t3voice/speech.log
-mkdir -p /tmp/t3voice "$HOME_DIR"
+PID_FILE=/tmp/t3voice-speech/speech.pid
+LOG_FILE=/tmp/t3voice-speech/speech.log
+mkdir -p /tmp/t3voice-speech "$HOME_DIR"
 
 answers() { curl -fsS -m 2 "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q "\"ready\""; }
 
 case "${1:-}" in
   stop)
-    if [ -s "$PID_FILE" ] && kill "$(cat "$PID_FILE")" 2>/dev/null; then echo "Stopped local speech."; fi
+    if [ -s "$PID_FILE" ] && pid="$(cat "$PID_FILE")" && kill "$pid" 2>/dev/null; then
+      for _ in $(seq 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+      echo "Stopped local speech."
+    fi
     rm -f "$PID_FILE"
     exit 0
     ;;

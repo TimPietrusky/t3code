@@ -59,11 +59,14 @@ def load_models() -> None:
     mx.set_cache_limit(256 * 1024 * 1024)
     started = time.time()
     models["stt"] = load_stt(STT_MODEL)
+    # The published Parakeet weights are fp32 (2.3 GB); bf16 halves that with the same transcripts.
+    models["stt"].set_dtype(mx.bfloat16)
     models["tts"] = load_tts(TTS_MODEL)
-    # The first call loads the phonemizer and compiles kernels; do it before anyone waits on it.
-    transcribe_pcm(np.zeros(STT_RATE, dtype=np.float32))
-    for _ in synthesize("Ready."):
-        pass
+    # First calls load the phonemizer and compile kernels (~1.5 s); pay that before anyone waits.
+    # Real speech, so the transcriber's decoder runs too: silence never reaches it.
+    spoken = b"".join(synthesize("Ready when you are. What should we work on first?"))
+    at_24k = pcm16_to_float(spoken)
+    transcribe_pcm(np.interp(np.arange(0, at_24k.size, 1.5), np.arange(at_24k.size), at_24k))
     mx.clear_cache()
     log(f"models ready in {time.time() - started:.1f}s ({STT_MODEL}, {TTS_MODEL} {VOICE})")
 
