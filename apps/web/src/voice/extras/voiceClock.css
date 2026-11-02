@@ -1,7 +1,13 @@
-[data-t3voice-clock] {
+/* The top right corner: the streamer toggle, then the clock; the panel starts one row lower. */
+[data-t3voice-corner] {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
   right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  gap: 6px;
+}
+[data-t3voice-clock],
+[data-t3voice-streamer] {
   padding: 1px 6px 0;
   border: 1px solid rgba(61, 255, 143, 0.34);
   color: #3dff8f;
@@ -9,7 +15,20 @@
   font-family: "Oxanium", ui-monospace, monospace;
   font-size: 11px;
   font-weight: 600;
+  line-height: 1.5;
   letter-spacing: 0.1em;
+}
+[data-t3voice-clock] {
   font-variant-numeric: tabular-nums;
   pointer-events: none;
+}
+[data-t3voice-streamer] {
+  text-transform: uppercase;
+  cursor: pointer;
+  pointer-events: auto;
+}
+[data-t3voice-streamer][aria-pressed="true"] {
+  color: #0b0f0d;
+  background: #3dff8f;
+  border-color: #3dff8f;
 }

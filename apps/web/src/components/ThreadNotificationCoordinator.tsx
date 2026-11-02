@@ -37,6 +37,7 @@ import {
   type ThreadNotificationObservation,
 } from "./ThreadNotificationCoordinator.logic";
 import { toastManager } from "./ui/toast";
+import { StreamerText, streamerText } from "../voice/streamerMode";
 
 interface NotificationState extends ThreadNotificationObservation {
   readonly raw: OrchestrationV2ThreadShell;
@@ -157,7 +158,7 @@ export function startThreadNotifications(
         onRemove: (): void => forgetToast(toastKey, toastId),
         type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
         title,
-        description: thread.title,
+        description: <StreamerText text={thread.title} />,
         data: {
           hideCopyButton: true,
           leadingIcon:
@@ -196,7 +197,7 @@ export function startThreadNotifications(
       return;
     try {
       const notification = new Notification(title, {
-        body: thread.title,
+        body: streamerText(thread.title),
         tag: threadNotificationTag(environmentId, thread.id),
         silent: true,
         // Windows drops clicks after a toast moves into Notification Center.

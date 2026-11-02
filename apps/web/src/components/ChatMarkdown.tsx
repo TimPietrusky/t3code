@@ -187,6 +187,7 @@ import {
   BrowserSettingsReadError,
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
+import { useStreamerText } from "../voice/streamerMode";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 import { MarkdownCodeBlock, SuspenseShikiCodeBlock } from "./chat/MarkdownCodeBlock";
 import { createMarkdownRenderer } from "./chat/markdownRenderer";
@@ -1730,6 +1731,7 @@ function ChatMarkdown({
 }: ChatMarkdownProps) {
   const { componentState, handleCopy, markdownRef, localMediaPreview, closeLocalMediaPreview } =
     useChatMarkdownState({ text, inline, ...props });
+  const streamerText = useStreamerText(text);
   // Streaming re-renders only the last block; offsets for task edits need the whole text.
   const streamingBlocks =
     props.isStreaming === true &&
@@ -1744,6 +1746,20 @@ function ChatMarkdown({
     extraRemarkPlugins.length === 0 &&
     /(?:^|\n) {0,3}(?:`{3}|~{3})/.test(text);
   const Root = inline ? "span" : "div";
+  if (streamerText !== text) {
+    return (
+      <Root
+        className={cn(
+          "chat-markdown w-full min-w-0 [overflow-wrap:anywhere]",
+          !inline && "text-sm leading-relaxed",
+          className,
+        )}
+        data-streamer-text={inline ? "" : "block"}
+      >
+        {streamerText}
+      </Root>
+    );
+  }
   const bindMarkdownRef = (node: HTMLElement | null) => {
     markdownRef.current = node;
   };

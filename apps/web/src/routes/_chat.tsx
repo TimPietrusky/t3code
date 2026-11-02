@@ -10,6 +10,7 @@ import { retainThreadFindForRoute } from "../components/chat/threadFindStore";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { VoiceDock } from "../voice/VoiceDock";
+import { StreamerFilter } from "../voice/streamerMode";
 import { voiceEnabled } from "../voice/voiceOpen";
 
 function threadRouteTargetKey(target: ThreadRouteTarget | null) {
@@ -47,6 +48,7 @@ function ChatRouteLayout() {
       )}
       {modalOpen ? <Outlet /> : null}
       {voiceEnabled && authenticated ? <VoiceDock /> : null}
+      <StreamerFilter />
     </>
   );
 }

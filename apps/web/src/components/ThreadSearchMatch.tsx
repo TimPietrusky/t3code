@@ -4,6 +4,7 @@ import {
   type SearchMatchHint,
   type SearchRange,
 } from "@t3tools/shared/paletteSearch";
+import { StreamerText, useStreamerMode } from "../voice/streamerMode";
 
 /** `text` with each range in semibold foreground. */
 function HighlightedSearchText(props: { text: string; ranges: ReadonlyArray<SearchRange> }) {
@@ -37,15 +38,20 @@ export function ThreadSearchMatchExcerpt(props: {
   };
 }) {
   const isUser = props.match.source === "user";
+  const streamer = useStreamerMode();
   return (
     <span className="truncate text-xs text-muted-foreground/85">
       <span className={isUser ? "text-info-foreground" : "text-success-foreground"}>
         {isUser ? "You:" : "Agent:"}
       </span>{" "}
-      <HighlightedSearchText
-        text={props.match.snippet}
-        ranges={findSearchTokenRanges(props.match.snippet, props.match.query)}
-      />
+      {streamer ? (
+        <StreamerText text={props.match.snippet} />
+      ) : (
+        <HighlightedSearchText
+          text={props.match.snippet}
+          ranges={findSearchTokenRanges(props.match.snippet, props.match.query)}
+        />
+      )}
     </span>
   );
 }

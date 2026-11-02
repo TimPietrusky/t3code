@@ -42,6 +42,7 @@ import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { useClientSettings } from "../../hooks/useSettings";
 import { GuestShareIndicator } from "./GuestShareControls";
+import { StreamerText } from "../../voice/streamerMode";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -337,7 +338,7 @@ export const ChatHeader = memo(function ChatHeader({
                     aria-hidden
                     className={collapseParentTitle ? "w-0" : undefined}
                   >
-                    {parentThreadLink.title}
+                    <StreamerText text={parentThreadLink.title} />
                   </WorkspaceBreadcrumbText>
                   {collapseParentTitle ? (
                     <span aria-hidden data-parent-breadcrumb-ellipsis>
@@ -345,7 +346,9 @@ export const ChatHeader = memo(function ChatHeader({
                     </span>
                   ) : null}
                 </TooltipTrigger>
-                <TooltipPopup side="top">{parentThreadLink.title}</TooltipPopup>
+                <TooltipPopup side="top">
+                  <StreamerText text={parentThreadLink.title} />
+                </TooltipPopup>
               </Tooltip>
             </WorkspaceBreadcrumbItem>
             <WorkspaceBreadcrumbSeparator>
@@ -392,7 +395,9 @@ export const ChatHeader = memo(function ChatHeader({
                 }
               >
                 <h2 className="min-w-0" dir={textDirection(activeThreadTitle)}>
-                  <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
+                  <WorkspaceBreadcrumbText>
+                    <StreamerText text={activeThreadTitle} />
+                  </WorkspaceBreadcrumbText>
                 </h2>
                 <ChevronDownIcon
                   aria-hidden
@@ -400,7 +405,9 @@ export const ChatHeader = memo(function ChatHeader({
                   className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/thread-title:opacity-100 group-focus-visible/thread-title:opacity-100"
                 />
               </TooltipTrigger>
-              <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
+              <TooltipPopup side="top">
+                <StreamerText text={activeThreadTitle} />
+              </TooltipPopup>
             </Tooltip>
           ) : (
             <Tooltip>
@@ -413,9 +420,13 @@ export const ChatHeader = memo(function ChatHeader({
                   />
                 }
               >
-                <WorkspaceBreadcrumbText>{activeThreadTitle}</WorkspaceBreadcrumbText>
+                <WorkspaceBreadcrumbText>
+                  <StreamerText text={activeThreadTitle} />
+                </WorkspaceBreadcrumbText>
               </TooltipTrigger>
-              <TooltipPopup side="top">{activeThreadTitle}</TooltipPopup>
+              <TooltipPopup side="top">
+                <StreamerText text={activeThreadTitle} />
+              </TooltipPopup>
             </Tooltip>
           )}
           {renamingTitle === null && activeThreadLinkOrigin ? (

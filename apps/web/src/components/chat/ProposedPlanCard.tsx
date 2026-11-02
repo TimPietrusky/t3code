@@ -37,6 +37,7 @@ import { projectEnvironment } from "~/state/projects";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
+import { StreamerText } from "../../voice/streamerMode";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
@@ -164,7 +165,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           <Badge variant="secondary">Plan</Badge>
           {}
           <h3 data-thread-find-text="true" className="truncate text-sm font-medium text-foreground">
-            {title}
+            <StreamerText text={title} />
           </h3>
         </div>
         <Menu>

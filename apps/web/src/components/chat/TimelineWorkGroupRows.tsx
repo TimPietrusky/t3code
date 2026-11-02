@@ -54,6 +54,7 @@ import {
   workEntryIconName,
 } from "./TimelineWorkEntryRow.logic";
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
+import { StreamerText } from "../../voice/streamerMode";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
@@ -568,7 +569,7 @@ export function LiveWorkEntryTimelineRow({
               linked={false}
             />
           ) : (
-            label
+            <StreamerText text={label} />
           )
         }
         iconName={workEntryIconName(row.entry)}

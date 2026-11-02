@@ -1,3 +1,4 @@
+import { Hidden } from "./streamer";
 import "./dayRecap.css";
 
 type Entry = { readonly title: string; readonly detail: string; readonly state: "done" | "doing" };
@@ -74,8 +75,12 @@ export function DayRecap() {
       <ol>
         {ENTRIES.map((entry) => (
           <li key={entry.title} data-state={entry.state}>
-            <strong>{entry.title}</strong>
-            <span>{entry.detail}</span>
+            <strong>
+              <Hidden text={entry.title} />
+            </strong>
+            <span>
+              <Hidden text={entry.detail} />
+            </span>
           </li>
         ))}
       </ol>

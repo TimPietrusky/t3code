@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Hidden } from "./streamer";
 import { AFTER_CONF_READ, AFTER_CONF_TICKETS, type TicketRec } from "./afterConfTickets";
 
 type Decision = "keep" | "close";
@@ -97,15 +98,21 @@ export function TicketReview() {
               <button type="button" aria-expanded={expanded} onClick={() => toggle(ticket.id)}>
                 <b>{index + 1}</b>
                 <span>
-                  <strong>{ticket.title}</strong>
+                  <strong>
+                    <Hidden text={ticket.title} />
+                  </strong>
                   <small>
                     {ticket.id} · {ticket.state}
                     {ticket.who ? ` · ${ticket.who}` : ""}
                   </small>
                   {expanded ? (
                     <span data-t3voice-ticket-detail="">
-                      <span>{ticket.about}</span>
-                      <em>{ticket.why}</em>
+                      <span>
+                        <Hidden text={ticket.about} />
+                      </span>
+                      <em>
+                        <Hidden text={ticket.why} />
+                      </em>
                     </span>
                   ) : null}
                 </span>

@@ -103,6 +103,7 @@ import { pickSnoozePreset, resolveSnoozePresets, type SnoozePreset } from "../Si
 import { useThreadShell } from "../../state/entities";
 import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
+import { StreamerText } from "../../voice/streamerMode";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelName } from "../chat/providerIconUtils";
@@ -1040,7 +1041,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       )}
       dir={textDirection(thread.title)}
     >
-      {thread.title}
+      <StreamerText text={thread.title} />
     </span>
   );
   const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
@@ -1736,7 +1737,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
                   thread.titleRegeneration != null && "opacity-55",
                 )}
               >
-                {thread.title}
+                <StreamerText text={thread.title} />
               </span>
               <span id={`${props.resultId}-pr`} className="contents">
                 <ThreadSearchPullRequestNumber

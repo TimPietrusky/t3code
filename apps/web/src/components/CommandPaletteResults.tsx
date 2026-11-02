@@ -24,6 +24,7 @@ import {
 import { getVirtualizedScrollFadeClassName } from "./ui/scroll-area";
 import { ProjectPinButton } from "./ProjectPinButton";
 import { SearchMatchHintLine, ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
+import { StreamerText } from "../voice/streamerMode";
 
 interface CommandPaletteResultsProps {
   emptyStateMessage?: string;
@@ -156,12 +157,12 @@ export function CommandPaletteTitleIcon(props: { children: ReactNode }) {
 function CommandPaletteTitle({
   item,
 }: {
-  item: Pick<CommandPaletteActionItem | CommandPaletteSubmenuItem, "title">;
+  item: Pick<CommandPaletteActionItem | CommandPaletteSubmenuItem, "title" | "threadSearch">;
 }) {
   const { title } = item;
   return (
     <span className="truncate" dir={typeof title === "string" ? textDirection(title) : undefined}>
-      {title}
+      {item.threadSearch && typeof title === "string" ? <StreamerText text={title} /> : title}
     </span>
   );
 }

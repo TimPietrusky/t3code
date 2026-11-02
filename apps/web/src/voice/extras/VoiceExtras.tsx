@@ -1,4 +1,5 @@
 import { CanvasPanel } from "./CanvasPanel";
+import { StreamerToggle } from "./StreamerToggle";
 import { VoiceClock } from "./VoiceClock";
 
 /**
@@ -8,7 +9,10 @@ import { VoiceClock } from "./VoiceClock";
 export function VoiceExtras() {
   return (
     <>
-      <VoiceClock />
+      <div data-t3voice-corner="">
+        <StreamerToggle />
+        <VoiceClock />
+      </div>
       <CanvasPanel />
     </>
   );

@@ -29,6 +29,7 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { BackgroundThreadContext } from "./backgroundThread";
+import { StreamerText } from "../../voice/streamerMode";
 
 /** A side chat tab: its title, Bring back, Delete and Close, over the side chat's own chat. */
 export default function SideChatPane(props: {
@@ -126,7 +127,7 @@ export default function SideChatPane(props: {
     <div data-side-chat-pane className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pr-1 pl-3">
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
-          {shell?.title ?? "Side chat"}
+          {shell ? <StreamerText text={shell.title} /> : "Side chat"}
         </span>
         <Tooltip>
           <TooltipTrigger

@@ -104,6 +104,7 @@ import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
+import { StreamerText } from "../voice/streamerMode";
 
 export interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -906,6 +907,12 @@ function RightPanelTab(
       : null,
   );
   const title = sideChatShell?.title ?? props.title;
+  const shownTitle =
+    surface.kind === "side-chat" || surface.kind === "preview" ? (
+      <StreamerText text={title} />
+    ) : (
+      title
+    );
   const sideChatState = sideChatTabState(sideChatShell);
   const content = (
     <>
@@ -979,7 +986,7 @@ function RightPanelTab(
                 aria-label={sideChatState === null ? undefined : `${title}, ${sideChatState}`}
                 onClick={() => onActivate(surface)}
               >
-                <span className="truncate">{title}</span>
+                <span className="truncate">{shownTitle}</span>
               </button>
             }
           />
@@ -991,7 +998,7 @@ function RightPanelTab(
                 title={title}
               />
             ) : (
-              title
+              shownTitle
             )}
           </TooltipPopup>
         </Tooltip>

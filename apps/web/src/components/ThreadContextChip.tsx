@@ -7,6 +7,7 @@ import { useProject, useThreadShell } from "~/state/entities";
 import { ContextChip, ContextChipLabel } from "./ContextChip";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { StreamerText } from "../voice/streamerMode";
 
 export function ThreadContextChip(props: {
   record: Pick<ThreadContextRecord, "environmentId" | "threadId" | "title">;
@@ -34,7 +35,9 @@ export function ThreadContextChip(props: {
             ) : (
               <MessagesSquareIcon />
             )}
-            <ContextChipLabel>{title}</ContextChipLabel>
+            <ContextChipLabel>
+              <StreamerText text={title} />
+            </ContextChipLabel>
           </ContextChip>
         }
       />

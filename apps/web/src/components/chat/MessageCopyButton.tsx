@@ -10,6 +10,7 @@ import {
   showAnchoredCopySuccessToast,
 } from "../ui/anchoredCopyToast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { useStreamerText } from "../../voice/streamerMode";
 
 export const MessageCopyButton = memo(function MessageCopyButton({
   text,
@@ -29,11 +30,13 @@ export const MessageCopyButton = memo(function MessageCopyButton({
   className?: string;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
+  const copyText = useStreamerText(text);
+  const flavors = copyText === text ? extraFlavors : undefined;
   const { copyToClipboard, isCopied } = useCopyToClipboard<void>({
     onCopy: () => showAnchoredCopySuccessToast(ref),
     onError: (error: Error) => showAnchoredCopyErrorToast(ref, error),
     timeout: ANCHORED_COPY_TOAST_TIMEOUT_MS,
-    ...(extraFlavors ? { extraFlavors } : {}),
+    ...(flavors ? { extraFlavors: flavors } : {}),
   });
 
   return (
@@ -43,7 +46,7 @@ export const MessageCopyButton = memo(function MessageCopyButton({
           <Button
             aria-label={label}
             disabled={isCopied}
-            onClick={() => copyToClipboard(text)}
+            onClick={() => copyToClipboard(copyText)}
             ref={ref}
             type="button"
             size={size}

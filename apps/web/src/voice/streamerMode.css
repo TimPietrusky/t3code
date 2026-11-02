@@ -1,0 +1,14 @@
+/* Streamer mode: scrambled text, drawn through the mosaic in StreamerFilter. Chrome drops an SVG
+   filter on a plain inline box, so inline text becomes an inline-block that still truncates. */
+[data-streamer-text] {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  filter: url(#t3-streamer-pixelate);
+}
+[data-streamer-text="block"] {
+  display: block;
+  white-space: pre-wrap;
+}

@@ -67,6 +67,7 @@ import {
   THINKING_PREVIEW_PLUGINS,
   THOUGHT_PREVIEW_PLUGINS,
 } from "./TimelineWorkEntryRow.logic";
+import { StreamerText } from "../../voice/streamerMode";
 
 export function useThreadReadTarget(entry: TimelineWorkEntry, environmentId: EnvironmentId) {
   const rawThreadId = threadReadTargetId(entry);
@@ -435,7 +436,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
                   linked
                 />
               ) : (
-                previewText
+                <StreamerText text={previewText} />
               )}
             </span>
             {answerPreview ? (
@@ -449,7 +450,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
                     : "text-muted-foreground",
                 )}
               >
-                {answerPreview}
+                <StreamerText text={answerPreview} />
               </span>
             ) : null}
           </p>
