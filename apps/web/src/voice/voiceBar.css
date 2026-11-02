@@ -63,3 +63,12 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* The bar takes the composer's column (useComposerClearance measures it), not Presence's viewport
+   centre and 780px: its box is the column, so the frame sits 10px in and its brackets inside. */
+[data-t3voice-presence][data-t3voice-column] .bar {
+  left: var(--t3voice-col-left);
+  right: auto;
+  width: var(--t3voice-col-width);
+  margin-inline: 0;
+}

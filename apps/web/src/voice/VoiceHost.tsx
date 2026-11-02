@@ -343,7 +343,7 @@ export function VoiceHost() {
     };
   }, []);
 
-  const clearance = useComposerClearance();
+  const composer = useComposerClearance();
 
   if (config === null) return <VoiceExtras />;
 
@@ -378,7 +378,8 @@ export function VoiceHost() {
               ? "Stop the reply"
               : "Stop voice (Ctrl+Option+V)"
         }
-        bottom={clearance}
+        bottom={composer.clearance}
+        column={composer.column}
         onPress={() => void toggle()}
         analysis={() => sessionRef.current?.analysis() ?? null}
         stoppedAt={stoppedAt}
