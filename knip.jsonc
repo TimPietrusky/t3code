@@ -27,6 +27,8 @@
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
+        // scripts/t3voice.sh starts the phone front door by path.
+        "t3voice-phone.mjs",
         "knip-schemas.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",

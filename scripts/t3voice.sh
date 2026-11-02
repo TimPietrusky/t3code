@@ -3,7 +3,9 @@
 # machine (the desktop app's), with the voice control. Nothing is installed or restarted.
 #
 #   scripts/t3voice.sh          start the dev web client on http://127.0.0.1:${T3VOICE_PORT:-5790}
-#   scripts/t3voice.sh pair     print a one-time pairing link for a browser that is not paired yet
+#   scripts/t3voice.sh pair     write a one-time pairing link (15 min, one use) to /tmp/t3voice/pair-link.txt
+#   scripts/t3voice.sh phone    publish it for a phone over HTTPS via `netbird expose` (NetBird SSO,
+#                               group $T3VOICE_NETBIRD_GROUP) and write a phone pairing link
 #
 # The ElevenLabs key comes from ELEVENLABS_API_KEY, or from Infisical through kale-secret-get, and
 # only ever lives in the Vite process's environment.
@@ -20,10 +22,40 @@ server_port() {
 SERVER_PORT="$(server_port)" || { echo "No running T3 Code server found ($RUNTIME). Open T3 Code first." >&2; exit 1; }
 
 if [ "${1:-}" = "pair" ]; then
-  token="$("$T3" pair --ttl 15m --label "t3 voice (web dev)" | sed -n 's/.*token=\([^[:space:]]*\).*/\1/p' | head -1)"
+  # One-time T3 pairing link for a browser that is not paired yet: valid 15 minutes, one use.
+  # It is a credential, so it goes to a private file and is never printed.
+  origin="${T3VOICE_PUBLIC_ORIGIN:-http://127.0.0.1:$PORT}"
+  scopes=()
+  # A browser reaching T3 from outside this Mac gets only what voice needs: threads, no
+  # terminal, files, settings or access management.
+  [ -n "${T3VOICE_PUBLIC_ORIGIN:-}" ] && scopes=(--scope orchestration:read --scope orchestration:operate)
+  out="${T3VOICE_PAIR_FILE:-/tmp/t3voice/pair-link.txt}"
+  mkdir -p "$(dirname "$out")"
+  token="$("$T3" pair --ttl 15m --label "t3 voice (${origin#*://})" ${scopes[@]+"${scopes[@]}"} | sed -n 's/.*token=\([^[:space:]]*\).*/\1/p' | head -1)"
   [ -n "$token" ] || { echo "Could not mint a pairing token." >&2; exit 1; }
-  echo "Open once in your browser (valid 15 minutes, one use):"
-  echo "  http://127.0.0.1:$PORT/pair#token=$token"
+  (umask 077 && printf '%s/pair#token=%s\n' "$origin" "$token" > "$out")
+  echo "Pairing link written to $out (valid 15 minutes, one use)."
+  exit 0
+fi
+
+if [ "${1:-}" = "phone" ]; then
+  # The phone reaches a loopback front door through NetBird's reverse proxy, behind NetBird SSO
+  # for one group; nothing listens on the NetBird or LAN address. Ctrl+C takes the URL down.
+  group="${T3VOICE_NETBIRD_GROUP:-kale-board-tim}"
+  phone_port="${T3VOICE_PHONE_PORT:-5791}"
+  T3VOICE_PHONE_PORT="$phone_port" T3VOICE_PORT="$PORT" node "$ROOT/scripts/t3voice-phone.mjs" &
+  front=$!
+  trap 'kill $front 2>/dev/null' EXIT
+  mkdir -p /tmp/t3voice && rm -f /tmp/t3voice/public-origin
+  netbird expose "$phone_port" --with-name-prefix t3-voice --with-user-groups "$group" 2>&1 |
+    while IFS= read -r line; do
+      echo "$line"
+      url="$(printf '%s' "$line" | grep -o 'https://[A-Za-z0-9.-]*' | head -1 || true)"
+      if [ -n "$url" ] && [ ! -s /tmp/t3voice/public-origin ]; then
+        printf '%s\n' "$url" > /tmp/t3voice/public-origin
+        T3VOICE_PUBLIC_ORIGIN="$url" "$ROOT/scripts/t3voice.sh" pair
+      fi
+    done
   exit 0
 fi
 
@@ -32,7 +64,8 @@ fi
 
 if [ "${1:-}" = "__web" ]; then
   cd "$ROOT/apps/web"
-  exec env T3CODE_SINGLE_ORIGIN_DEV=1 T3CODE_PORT="$SERVER_PORT" PORT="$PORT" HOST=127.0.0.1 "$ROOT/node_modules/.bin/vp" dev
+  # NetBird's domain may reach Vite through the phone front door; DNS there is NetBird's.
+  exec env T3CODE_SINGLE_ORIGIN_DEV=1 T3CODE_DEV_ALLOWED_HOSTS=.netbird.services T3CODE_PORT="$SERVER_PORT" PORT="$PORT" HOST=127.0.0.1 "$ROOT/node_modules/.bin/vp" dev
 fi
 
 echo "t3 voice: http://127.0.0.1:$PORT  (server :$SERVER_PORT). First time in a browser: scripts/t3voice.sh pair"

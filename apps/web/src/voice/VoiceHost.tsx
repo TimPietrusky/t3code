@@ -17,6 +17,7 @@ import { Button } from "../components/ui/button";
 import { markBriefed, needsBrief, withBrief } from "./brief";
 import { type VoicePhase, VoiceSession } from "./speech";
 import { takeSentences } from "./speechText";
+import { useComposerClearance } from "./useComposerClearance";
 import { VoiceExtras } from "./VoiceExtras";
 import { syncVoiceTheme } from "./voiceThemeSync";
 
@@ -176,6 +177,11 @@ export function VoiceHost() {
 
   const toggle = useEffectEvent(async () => {
     const current = sessionRef.current;
+    // While a reply plays, a tap only stops the reply; on a phone its speaker sits next to the mic.
+    if (current?.active && phase === "speaking") {
+      current.stopSpeaking();
+      return;
+    }
     if (current?.active) {
       current.stop();
       sessionRef.current = null;
@@ -238,6 +244,8 @@ export function VoiceHost() {
     };
   }, []);
 
+  const clearance = useComposerClearance();
+
   if (config === null) return <VoiceExtras />;
 
   const label =
@@ -251,17 +259,29 @@ export function VoiceHost() {
   return (
     <>
       <VoiceExtras />
-      <div className="pointer-events-none fixed right-3 bottom-3 z-50 flex items-center gap-2">
+      <div
+        className="pointer-events-none fixed right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-50 flex items-center gap-2"
+        style={clearance > 0 ? { bottom: clearance } : undefined}
+      >
         {label ? (
-          <span className="max-w-72 truncate rounded-full border bg-popover px-2.5 py-1 text-xs text-muted-foreground shadow-xs">
+          <span
+            data-t3voice-label
+            className="max-w-72 truncate rounded-full border bg-popover px-2.5 py-1 text-xs text-muted-foreground shadow-xs"
+          >
             {label}
           </span>
         ) : null}
         <div className="pointer-events-auto">
           <Button
             variant={phase === "off" ? "outline" : "default"}
-            size="icon-lg"
-            aria-label={phase === "off" ? "Start voice (Ctrl+Option+V)" : "Stop voice"}
+            size="icon-xl"
+            aria-label={
+              phase === "off"
+                ? "Start voice (Ctrl+Option+V)"
+                : phase === "speaking"
+                  ? "Stop the reply"
+                  : "Stop voice"
+            }
             title={phase === "off" ? "Talk to T3 (Ctrl+Option+V)" : "Stop voice (Ctrl+Option+V)"}
             disabled={!config.speech}
             onClick={() => void toggle()}

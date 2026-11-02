@@ -115,12 +115,17 @@ export class VoiceSession {
 
   async start(): Promise<void> {
     if (this.stream !== null) return;
+    // Mobile Safari only starts audio inside the tap itself, so the context comes before any await,
+    // and play-and-record keeps replies audible with the ringer switch on silent.
+    const context = new AudioContext();
+    this.context = context;
+    void context.resume();
+    const audioSession = (navigator as { audioSession?: { type: string } }).audioSession;
+    if (audioSession !== undefined) audioSession.type = "play-and-record";
     this.stt.warm();
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
-    const context = new AudioContext();
-    this.context = context;
     const moduleUrl = URL.createObjectURL(
       new Blob([CAPTURE_WORKLET], { type: "application/javascript" }),
     );
