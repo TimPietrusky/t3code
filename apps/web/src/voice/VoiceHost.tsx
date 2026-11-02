@@ -21,7 +21,9 @@ import { useComposerClearance } from "./useComposerClearance";
 import { VoiceExtras } from "./VoiceExtras";
 import { syncVoiceTheme } from "./voiceThemeSync";
 
-const VOICE_THREAD_TITLE = "voice";
+// A T3VOICE_MODEL test run gets its own thread, so it never becomes the user's voice thread.
+const voiceThreadTitle = (config: VoiceConfig | null) =>
+  config?.model ? `voice test (${config.model})` : "voice";
 const HOLD_AFTER_MS = 3_500;
 
 type VoiceConfig = {
@@ -75,7 +77,7 @@ export function VoiceHost() {
         project !== undefined &&
         shell.environmentId === project.environmentId &&
         shell.projectId === project.id &&
-        shell.title === VOICE_THREAD_TITLE &&
+        shell.title === voiceThreadTitle(config) &&
         shell.archivedAt === null &&
         shell.deletedAt === null,
     )
@@ -149,7 +151,7 @@ export function VoiceHost() {
               bootstrap: {
                 createThread: {
                   projectId: project.id,
-                  title: VOICE_THREAD_TITLE,
+                  title: voiceThreadTitle(config),
                   modelSelection,
                   runtimeMode: "full-access",
                   interactionMode: "default",
