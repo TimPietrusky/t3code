@@ -21,6 +21,7 @@ import { GuestShareDialogHost } from "../components/chat/GuestShareControls";
 import { AddProjectToMachineDialogHost } from "../components/AddProjectToMachineDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { DevReplayHost } from "../components/DevReplayHost";
+import { PhoneBuildReload } from "../voice/PhoneBuildReload";
 import { VoiceHost } from "../voice/VoiceHost";
 import { FirstRunGate } from "../components/onboarding/FirstRunGate";
 import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
@@ -219,6 +220,7 @@ function RootRouteBranch() {
         primaryEnvironmentAuthenticated ? (
           <VoiceHost />
         ) : null}
+        {import.meta.env.VITE_T3VOICE === "1" && !import.meta.env.DEV ? <PhoneBuildReload /> : null}
         {primaryEnvironmentAuthenticated ? (
           <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />
         ) : null}
