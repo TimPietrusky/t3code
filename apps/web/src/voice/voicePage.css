@@ -1,5 +1,9 @@
 /* The voice page: the call frame sits at the bottom of the page, not the window, so an open
    sidebar never covers it; voice-made UI lies over the whole page. */
+/* Its own stacking context: nothing on the page, however high its z-index, rises over the sidebar. */
+[data-t3voice-page] {
+  isolation: isolate;
+}
 [data-t3voice-page] [data-t3voice-presence] .bar {
   position: absolute;
   width: min(780px, calc(100% - 2 * var(--grid-edge)));
