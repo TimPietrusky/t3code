@@ -66,7 +66,7 @@ const ENTRIES: readonly Entry[] = [
 /** The day's high-level work, for the product daily. */
 export function DayRecap() {
   return (
-    <section data-t3voice-recap="" aria-label="Today">
+    <div data-t3voice-recap="">
       <header>
         <span>Today</span>
         <span>{DAY}</span>
@@ -79,6 +79,6 @@ export function DayRecap() {
           </li>
         ))}
       </ol>
-    </section>
+    </div>
   );
 }

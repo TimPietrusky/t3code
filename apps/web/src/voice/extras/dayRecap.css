@@ -1,24 +1,4 @@
-/* Top left of the canvas, one row below the sidebar and mic buttons; ends well above the call bar. */
-[data-t3voice-recap] {
-  position: absolute;
-  top: calc(max(12px, env(safe-area-inset-top)) + 44px);
-  left: max(12px, env(safe-area-inset-left));
-  width: min(360px, calc(100% - 24px - 72px));
-  max-height: calc(100% - 244px);
-  overflow-y: auto;
-  scrollbar-width: none;
-  padding: 8px 10px;
-  border: 1px solid rgba(61, 255, 143, 0.34);
-  color: #d8ffe8;
-  background: rgba(11, 15, 13, 0.88);
-  font-family: "Oxanium", ui-monospace, monospace;
-  font-size: 12px;
-  line-height: 1.35;
-  pointer-events: auto;
-}
-[data-t3voice-recap]::-webkit-scrollbar {
-  display: none;
-}
+/* Inside the canvas panel (canvasPanel.css), which places and scrolls it. */
 [data-t3voice-recap] header {
   display: flex;
   justify-content: space-between;

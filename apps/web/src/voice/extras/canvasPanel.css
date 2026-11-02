@@ -1,0 +1,80 @@
+/* Top left of the canvas, one row below the sidebar and mic buttons; ends well above the call bar. */
+[data-t3voice-panel] {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 44px);
+  left: max(12px, env(safe-area-inset-left));
+  width: min(420px, calc(100% - 24px));
+  max-height: calc(100% - 244px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(61, 255, 143, 0.34);
+  color: #d8ffe8;
+  background: rgba(11, 15, 13, 0.9);
+  font-family: "Oxanium", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: auto;
+}
+[data-t3voice-panel] nav {
+  display: flex;
+  border-bottom: 1px solid rgba(61, 255, 143, 0.34);
+}
+[data-t3voice-panel] nav button {
+  flex: 1;
+  padding: 6px 8px;
+  border: 0;
+  background: none;
+  color: rgba(61, 255, 143, 0.6);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+[data-t3voice-panel] nav button[aria-pressed="true"] {
+  color: #0b0f0d;
+  background: #3dff8f;
+}
+[data-t3voice-panel-body] {
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 8px 10px;
+}
+[data-t3voice-panel-body]::-webkit-scrollbar {
+  display: none;
+}
+
+[data-t3voice-tickets] p {
+  margin: 0 0 6px;
+  color: #3dff8f;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+[data-t3voice-tickets] ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 5px;
+}
+[data-t3voice-tickets] li {
+  display: grid;
+  grid-template-columns: 2.4em 1fr;
+  align-items: baseline;
+}
+[data-t3voice-tickets] li b {
+  color: #3dff8f;
+  font-variant-numeric: tabular-nums;
+}
+[data-t3voice-tickets] li span {
+  display: grid;
+}
+[data-t3voice-tickets] strong {
+  font-weight: 500;
+}
+[data-t3voice-tickets] small {
+  opacity: 0.6;
+  font-size: 10px;
+}

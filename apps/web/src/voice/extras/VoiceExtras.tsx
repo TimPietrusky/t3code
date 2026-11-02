@@ -1,4 +1,4 @@
-import { DayRecap } from "./DayRecap";
+import { CanvasPanel } from "./CanvasPanel";
 import { VoiceClock } from "./VoiceClock";
 
 /**
@@ -9,7 +9,7 @@ export function VoiceExtras() {
   return (
     <>
       <VoiceClock />
-      <DayRecap />
+      <CanvasPanel />
     </>
   );
 }
