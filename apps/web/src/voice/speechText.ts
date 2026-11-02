@@ -129,6 +129,14 @@ export function isEchoOfSpoken(transcript: string, recentlySpoken: ReadonlyArray
   return heard.length >= 3 && foreignWords(transcript, recentlySpoken).length / heard.length <= 0.2;
 }
 
+// What local speech-to-text makes of breath and noise (2 Nov eval: "I'm sorry." 22 times in one walk).
+const NOISE_PHRASE = /^(?:i'?m sorry|sorry|mm+-?hmm+|thank you|thanks|bye|you)$/;
+
+/** Whether a transcript is nothing but a phrase the recogniser makes up from noise. */
+export function isNoisePhrase(text: string): boolean {
+  return NOISE_PHRASE.test(words(text).join(" "));
+}
+
 /** Whether a transcript holds any real word, not just filler sounds or punctuation. */
 export function hasRealWords(text: string): boolean {
   return words(text).some((word) => !FILLER.test(word));

@@ -11,6 +11,7 @@ import {
   foreignWords,
   hasForeignRun,
   hasRealWords,
+  isNoisePhrase,
   isEchoOfSpoken,
   speakableText,
   stripEcho,
@@ -143,6 +144,7 @@ function interruptingWords(heard: string, spoken: ReadonlyArray<string>): Readon
  */
 function isInterruption(heard: string, spoken: ReadonlyArray<string>): boolean {
   const all = heard.toLowerCase().match(/\p{L}[\p{L}'’]*|\d+/gu) ?? [];
+  if (isNoisePhrase(heard)) return false;
   const theirs = interruptingWords(heard, spoken);
   if (theirs.length < 2 || !hasForeignRun(heard, spoken)) return false;
   return all.length <= MAX_SHORT_INTERRUPTION || theirs.length / all.length >= MIN_THEIR_SHARE;
@@ -253,13 +255,37 @@ export class VoiceSession {
     );
     voiceLog("system", "mic.open", {
       engine: this.engine,
+      context: context.state,
+      rate: context.sampleRate,
       settings: this.stream.getAudioTracks()[0]?.getSettings?.() ?? null,
     });
+    // iOS: opening the microphone switches the audio session and can leave the context suspended.
+    if ((context.state as string) !== "running") void context.resume().catch(() => {});
+    // The one microphone stream lives for the whole call; if the platform ends it, say so.
+    for (const track of this.stream.getAudioTracks()) {
+      track.addEventListener("ended", () =>
+        voiceLog("system", "mic.ended", { label: track.label }),
+      );
+      track.addEventListener("mute", () => voiceLog("system", "mic.muted"));
+      track.addEventListener("unmute", () => voiceLog("system", "mic.unmuted"));
+    }
+    // A touch anywhere is the surest way to get a stalled iOS context running again.
+    document.addEventListener("touchend", this.onTouch, { passive: true });
     this.updatePhase();
   }
 
+  private readonly onTouch = (): void => {
+    const context = this.context;
+    if (context !== null && (context.state as string) !== "running") {
+      voiceLog("voice", "audio.context.touch", { state: context.state });
+      void context.resume().catch(() => {});
+    }
+  };
+
   stop(): void {
     this.player?.stop("call ended");
+    this.player?.dispose();
+    document.removeEventListener("touchend", this.onTouch);
     this.stt.close();
     if (this.capture !== null) this.capture.port.onmessage = null;
     for (const track of this.stream?.getTracks() ?? []) track.stop();
@@ -302,6 +328,11 @@ export class VoiceSession {
     };
   }
 
+  /** Drops a queued sentence that has not started playing (the hold line when the real one lands). */
+  cancelQueued(text: string): boolean {
+    return this.player?.drop(text) ?? false;
+  }
+
   stopSpeaking(reason = "tap"): void {
     this.player?.stop(reason);
   }
@@ -329,8 +360,8 @@ export class VoiceSession {
       });
     }
 
-    if (this.probing && speechEngine() === "local") {
-      // Switched to LAI mid-segment: drop it, nothing heard during a reply counts there.
+    if (this.probing && !this.stt.speechOnly) {
+      // Switched to a local service without voice detection mid-segment: nothing here counts.
       this.probing = false;
       this.stt.discard();
     }
@@ -338,10 +369,10 @@ export class VoiceSession {
       this.stt.push(pcm);
       this.probeMs += FRAME_MS;
       if (decision?.opened && decision.by === "speak") this.closeVoiceAt = now;
-      // A segment never ends while the gate is open: Tim's interruption stays in one transcript.
+      // A segment never ends while someone talks close: Tim's interruption stays in one transcript.
       if (
         !replyAudible ||
-        (this.probeMs >= PROBE_SEGMENT_MS && !this.gate.open) ||
+        (this.probeMs >= PROBE_SEGMENT_MS && !this.gate.open && !this.gate.voiced) ||
         this.probeMs >= MAX_SEGMENT_MS
       ) {
         this.endProbe();
@@ -352,10 +383,12 @@ export class VoiceSession {
     if (!this.inSpeech) {
       this.preRoll.push(pcm);
       if (this.preRoll.length > PRE_ROLL_FRAMES) this.preRoll.shift();
-      // Local speech-to-text has no voice detection of its own and turns the reply's echo into words
-      // on a phone: on LAI only a tap stops a reply (2 Nov stopgap, replies cut themselves off).
+      // During a reply the mic goes to speech-to-text only once the gate hears someone close (its
+      // pre-roll keeps the onset): a quiet room sends nothing (the eval: 182 empty transcripts in 6 min).
+      // During a reply only a transcript that is surely speech may cut it: local speech without its
+      // voice detection turns breath and noise into "I'm sorry." (2 Nov: Tim's replies cut off).
       if (replyAudible) {
-        if (speechEngine() !== "local") this.beginProbe();
+        if ((this.gate.voiced || this.gate.open) && this.stt.speechOnly) this.beginProbe();
       } else if (decision?.opened) this.beginSpeech(false);
       return;
     }
@@ -433,9 +466,11 @@ export class VoiceSession {
   private endProbe(): void {
     this.probing = false;
     const closeVoice = this.closeVoiceRecently();
+    const ms = this.probeMs;
     void this.stt
       .commit({ fallback: false })
       .then((text) => {
+        voiceLog("voice", "probe.segment", { ms, chars: text.trim().length, closeVoice });
         if (this.stream === null || text.trim() === "") return;
         const spoken = this.player?.recentlySpoken() ?? [];
         if (!isInterruption(text, spoken)) return;
@@ -522,11 +557,13 @@ export class VoiceSession {
     const words = heard.split(/\s+/).filter(Boolean);
     const drop = !hasRealWords(heard)
       ? "no real words"
-      : isEchoOfSpoken(heard, spoken)
-        ? "our own words coming back"
-        : words.length === 1 && info.speechMs < MIN_LONE_WORD_MS
-          ? "a lone word from a short noise"
-          : null;
+      : this.engine === "local" && isNoisePhrase(heard)
+        ? "a phrase made up from noise"
+        : isEchoOfSpoken(heard, spoken)
+          ? "our own words coming back"
+          : words.length === 1 && info.speechMs < MIN_LONE_WORD_MS
+            ? "a lone word from a short noise"
+            : null;
     const detail = {
       text: heard,
       engine: this.engine,

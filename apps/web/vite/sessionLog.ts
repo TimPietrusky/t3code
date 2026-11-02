@@ -9,8 +9,13 @@ import * as NodePath from "node:path";
  * by the page (voiceLog.ts). Text only: never audio, and keys that look like credentials are dropped.
  * `scripts/t3voice-log.mjs` prints the last session readably.
  */
-const SESSION_LOG_DIR =
-  process.env.T3VOICE_LOG_DIR?.trim() || NodePath.join(NodeOS.homedir(), "Library/Logs/t3voice");
+// Only the live dev server (port 5790) writes Tim's log; test servers on other ports write elsewhere.
+const LIVE_PORT = Number(process.env.T3VOICE_LIVE_PORT?.trim() || 5790);
+const logDir = (port: number) =>
+  process.env.T3VOICE_LOG_DIR?.trim() ||
+  (port === LIVE_PORT
+    ? NodePath.join(NodeOS.homedir(), "Library/Logs/t3voice")
+    : "/tmp/t3voice-test/logs");
 const SECRET = /token|secret|password|authori[sz]ation|cookie|api.?key/i;
 const MAX_TEXT = 4_000;
 const MAX_EVENTS = 500;
@@ -37,18 +42,18 @@ const today = () => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
 
-/** Appends the events (an array of objects) to today's file; returns how many were written. */
-export function appendSessionEvents(events: unknown): number {
+/** Appends the events (an array of objects) to today's file, tagged with the server's port. */
+export function appendSessionEvents(events: unknown, port: number): number {
   if (!Array.isArray(events)) return 0;
   const lines = events
     .slice(0, MAX_EVENTS)
     .filter((event) => typeof event === "object" && event !== null)
-    .map((event) => JSON.stringify({ at: new Date().toISOString(), ...(clean(event) as object) }));
+    .map((event) =>
+      JSON.stringify({ at: new Date().toISOString(), port, ...(clean(event) as object) }),
+    );
   if (lines.length === 0) return 0;
-  NodeFS.mkdirSync(SESSION_LOG_DIR, { recursive: true });
-  NodeFS.appendFileSync(
-    NodePath.join(SESSION_LOG_DIR, `sessions-${today()}.jsonl`),
-    `${lines.join("\n")}\n`,
-  );
+  const dir = logDir(port);
+  NodeFS.mkdirSync(dir, { recursive: true });
+  NodeFS.appendFileSync(NodePath.join(dir, `sessions-${today()}.jsonl`), `${lines.join("\n")}\n`);
   return lines.length;
 }

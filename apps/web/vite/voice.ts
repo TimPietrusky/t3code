@@ -30,7 +30,9 @@ const voiceId = () => process.env.T3VOICE_VOICE_ID?.trim() || "cgSgspJ2msm6clMCk
 const ttsModel = () => process.env.T3VOICE_TTS_MODEL?.trim() || "eleven_flash_v2_5";
 const sttModel = () => process.env.T3VOICE_STT_MODEL?.trim() || "scribe_v2";
 
-const workspaceRoot = NodePath.resolve(import.meta.dirname, "../../..");
+// T3VOICE_WORKSPACE_ROOT: a test server in a worktree uses the main checkout's "t3 voice" project.
+const workspaceRoot =
+  process.env.T3VOICE_WORKSPACE_ROOT?.trim() || NodePath.resolve(import.meta.dirname, "../../..");
 
 function readBody(req: Connect.IncomingMessage, limit: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -153,6 +155,8 @@ function proxyLocalSocket(
 }
 
 export function t3VoicePlugin(): Plugin {
+  // The dev server's own port: the session log goes to Tim's log only from the live one.
+  let serverPort = 0;
   const handle: Connect.NextHandleFunction = (req, res, next) => {
     const url = req.url ?? "";
     if (!url.startsWith(`${PREFIX}/`)) return next();
@@ -164,7 +168,7 @@ export function t3VoicePlugin(): Plugin {
     if (route === "/log" && req.method === "POST") {
       readBody(req, 512 * 1024)
         .then((raw) => {
-          const written = appendSessionEvents(JSON.parse(raw.toString("utf8")));
+          const written = appendSessionEvents(JSON.parse(raw.toString("utf8")), serverPort);
           sendJson(res, 200, { written });
         })
         .catch(() => sendJson(res, 400, { error: "bad log batch" }));
@@ -308,6 +312,7 @@ export function t3VoicePlugin(): Plugin {
     name: "t3code:voice",
     apply: "serve",
     configureServer(server) {
+      serverPort = server.config.server.port ?? 0;
       server.middlewares.use(handle);
       server.httpServer?.on("upgrade", (req, socket, head) => {
         if (req.url?.split("?")[0] === `${PREFIX}/local/stt`) proxyLocalSocket(req, socket, head);

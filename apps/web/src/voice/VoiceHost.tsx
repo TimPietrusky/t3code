@@ -26,7 +26,22 @@ import { syncVoiceTheme } from "./voiceThemeSync";
 // A T3VOICE_MODEL test run gets its own thread, so it never becomes the user's voice thread.
 const voiceThreadTitle = (config: VoiceConfig | null) =>
   config?.model ? `voice test (${config.model})` : "voice";
+// The hold line covers slow work: after this much silence once the brain runs a tool, or after the
+// longer wait whatever it does; dropped if the real line lands first (eval 2 Nov: 6 of 19 plain
+// answers got "One moment." a few hundred ms before the real line).
 const HOLD_AFTER_MS = 3_500;
+const HOLD_ANYWAY_MS = 7_000;
+const HOLD_CHECK_MS = 250;
+const HOLD_LINE = "One moment.";
+// What the brain says or thinks; anything else in its turn (a command, a search, a file) is work.
+const TALK_ITEMS = new Set([
+  "user_message",
+  "assistant_message",
+  "reasoning",
+  "notification",
+  "system_notice",
+  "checkpoint",
+]);
 const LOCAL_HEALTH_EVERY_MS = 10_000;
 
 type VoiceConfig = {
@@ -64,6 +79,10 @@ export function VoiceHost() {
   const holdTimerRef = useRef<number | null>(null);
   // When Tim's last words went to the thread (performance time), for the log's reply timings.
   const sentAtRef = useRef(0);
+  /** The send's wall time, to tell this turn's items from the previous turn's. */
+  const sentEpochRef = useRef(0);
+  /** The brain started a tool in this turn (it will be slow). */
+  const workStartedRef = useRef(false);
   const firstTextLoggedRef = useRef(false);
   // How much of each reply has been queued for speech, by turn item id.
   const spokenRef = useRef(new Map<string, number>());
@@ -142,7 +161,8 @@ export function VoiceHost() {
     const defaultSelection = serverSettings.defaultModelSelection;
     const modelSelection =
       defaultSelection !== null && config?.model
-        ? { instanceId: defaultSelection.instanceId, model: config.model }
+        ? // Same instance and options (effort) as the default; only the model differs.
+          { ...defaultSelection, model: config.model }
         : defaultSelection;
     const createdAt = new Date().toISOString();
     const message = { messageId: newMessageId(), role: "user" as const, attachments: [] };
@@ -199,13 +219,24 @@ export function VoiceHost() {
     if (briefed) markBriefed(threadId);
     voiceLog("tim", "send", { text, briefed, threadId });
     sentAtRef.current = performance.now();
+    sentEpochRef.current = Date.now();
+    workStartedRef.current = false;
     firstTextLoggedRef.current = false;
     if (holdTimerRef.current !== null) window.clearTimeout(holdTimerRef.current);
-    holdTimerRef.current = window.setTimeout(() => {
+    const checkHold = () => {
       holdTimerRef.current = null;
-      voiceLog("voice", "hold-line", { afterMs: HOLD_AFTER_MS });
-      sessionRef.current?.speak("One moment.");
-    }, HOLD_AFTER_MS);
+      const waited = performance.now() - sentAtRef.current;
+      if (waited >= HOLD_ANYWAY_MS || (waited >= HOLD_AFTER_MS && workStartedRef.current)) {
+        voiceLog("voice", "hold-line", {
+          afterMs: Math.round(waited),
+          work: workStartedRef.current,
+        });
+        sessionRef.current?.speak(HOLD_LINE);
+        return;
+      }
+      holdTimerRef.current = window.setTimeout(checkHold, HOLD_CHECK_MS);
+    };
+    holdTimerRef.current = window.setTimeout(checkHold, HOLD_AFTER_MS);
   });
 
   const toggle = useEffectEvent(async () => {
@@ -259,13 +290,17 @@ export function VoiceHost() {
     const session = sessionRef.current;
     if (session === null) return;
     for (const { item, visibility } of items) {
+      const startedAt = DateTime.toEpochMillis(item.startedAt ?? item.updatedAt);
+      const thisTurn = sentEpochRef.current > 0 && startedAt >= sentEpochRef.current - 500;
+      if (thisTurn && !TALK_ITEMS.has(item.type)) workStartedRef.current = true;
       if (item.type !== "assistant_message" || visibility !== "local") continue;
       if (item.parentItemId !== null) continue;
-      const startedAt = DateTime.toEpochMillis(item.startedAt ?? item.updatedAt);
       if (startedAt < sessionStartedAtRef.current - 1_000) continue;
       const queued = spokenRef.current.get(item.id) ?? 0;
       if (queued >= item.text.length && item.streaming) continue;
-      if (!firstTextLoggedRef.current && item.text.length > 0 && sentAtRef.current > 0) {
+      // Only this turn's reply: the previous turn's finished one is still in the list (eval 2 Nov:
+      // first-text read 1 ms after every send).
+      if (!firstTextLoggedRef.current && item.text.length > 0 && thisTurn) {
         firstTextLoggedRef.current = true;
         voiceLog("brain", "first-text", {
           msSinceSend: Math.round(performance.now() - sentAtRef.current),
@@ -274,9 +309,11 @@ export function VoiceHost() {
       }
       const { sentences, consumed } = takeSentences(item.text.slice(queued), !item.streaming);
       spokenRef.current.set(item.id, queued + consumed);
-      if (sentences.length > 0 && holdTimerRef.current !== null) {
-        window.clearTimeout(holdTimerRef.current);
+      if (sentences.length > 0) {
+        if (holdTimerRef.current !== null) window.clearTimeout(holdTimerRef.current);
         holdTimerRef.current = null;
+        // The hold line was queued but has not started: the real line replaces it.
+        session.cancelQueued(HOLD_LINE);
       }
       for (const sentence of sentences) {
         voiceLog("brain", "sentence", {

@@ -1,8 +1,8 @@
 /**
- * Speaks reply sentences in order through the session's AudioContext. Each sentence's audio is
- * requested as soon as it is queued and streamed as raw PCM, so playback starts with the first
- * chunk and the next sentence is ready when the current one ends. All speech passes one analyser,
- * which gives the echo detector the exact level being played.
+ * Speaks reply sentences in order through the session's AudioContext, streamed as raw PCM through
+ * one analyser (the echo detector's level). A reply ends on the audio clock, never a wall timer:
+ * iOS can interrupt the context mid-reply, so it is resumed, cut pieces replay, and every end is
+ * logged with its cause.
  */
 import type { SpeechEngine } from "./engine";
 import { voiceLog } from "./voiceLog";
@@ -11,10 +11,25 @@ const TTS_SAMPLE_RATE = 24_000;
 const FIRST_CHUNK_SAMPLES = 1_200; // 50 ms: start quickly
 const CHUNK_SAMPLES = 4_800; // then 200 ms pieces
 const SCHEDULE_AHEAD_S = 0.03;
+// A piece that ends this much before its scheduled end was cut short (not by us).
+const EARLY_END_S = 0.06;
+// Give up on a context that will not run again after this long (then the reply ends, logged).
+const STALLED_GIVE_UP_MS = 20_000;
+const RESUME_RETRY_MS = 400;
+
+type PlaybackEndCause = "finished" | "barge" | "ctx-interrupted" | "error" | string;
+
+type ScheduledPiece = {
+  readonly source: AudioBufferSourceNode;
+  readonly samples: Float32Array<ArrayBuffer>;
+  readonly startAt: number;
+  readonly endAt: number;
+};
 
 type QueuedSentence = {
   readonly text: string;
   readonly queuedAt: number;
+  started: boolean;
   readonly chunks: Float32Array<ArrayBuffer>[];
   done: boolean;
   failed: boolean;
@@ -25,7 +40,16 @@ export class SpeechPlayer {
   private readonly output: AnalyserNode;
   private readonly frame: Float32Array<ArrayBuffer>;
   private queue: QueuedSentence[] = [];
-  private sources = new Set<AudioBufferSourceNode>();
+  private pieces = new Set<ScheduledPiece>();
+  /** Where the next piece starts on the context's clock. */
+  private playhead = 0;
+  /** Wakes the run's wait for the last piece to end. */
+  private settled: (() => void) | null = null;
+  /** The context stopped running mid-reply (performance time), null while it runs. */
+  private stalledSince: number | null = null;
+  private resumeTimer: number | null = null;
+  /** Sentences whose speech failed in this run (the end is logged as "error"). */
+  private failedInRun = 0;
   private aborter = new AbortController();
   private running = false;
   /** Bumped by stop(), so an interrupted run ends at its next await. */
@@ -52,6 +76,54 @@ export class SpeechPlayer {
     this.output.smoothingTimeConstant = 0.8;
     this.output.connect(context.destination);
     this.frame = new Float32Array(this.output.fftSize);
+    context.addEventListener("statechange", this.onContextState);
+  }
+
+  /** Stops watching the context (the call ended). */
+  dispose(): void {
+    this.context.removeEventListener("statechange", this.onContextState);
+    if (this.resumeTimer !== null) window.clearTimeout(this.resumeTimer);
+    this.resumeTimer = null;
+  }
+
+  private readonly onContextState = (): void => {
+    const state = this.context.state as string;
+    voiceLog("voice", "audio.context", {
+      state,
+      speaking: this.running,
+      clock: Math.round(this.context.currentTime * 1000) / 1000,
+      visibility: document.visibilityState,
+    });
+    if (state === "running") {
+      if (this.stalledSince !== null) {
+        voiceLog("voice", "playback.resumed", {
+          afterMs: Math.round(performance.now() - this.stalledSince),
+          current: this.current,
+        });
+      }
+      this.stalledSince = null;
+      // Anything cut short while the context was down plays again from where it stopped.
+      this.recover("resumed");
+      return;
+    }
+    if (state === "closed" || !this.running) return;
+    // "interrupted" (iOS: a call, Siri, an audio route change) or "suspended": keep the reply, get
+    // the context going again.
+    this.stalledSince ??= performance.now();
+    this.resumeContext();
+  };
+
+  /** Asks the context to run again until it does (iOS resumes once its interruption ends). */
+  resumeContext(): void {
+    if (this.resumeTimer !== null) return;
+    const attempt = () => {
+      this.resumeTimer = null;
+      const state = this.context.state as string;
+      if (state === "running" || state === "closed" || !this.running) return;
+      this.context.resume().catch(() => {});
+      this.resumeTimer = window.setTimeout(attempt, RESUME_RETRY_MS);
+    };
+    attempt();
   }
 
   /** What is being played, for the bar's wave. */
@@ -86,6 +158,7 @@ export class SpeechPlayer {
     const sentence: QueuedSentence = {
       text,
       queuedAt: performance.now(),
+      started: false,
       chunks: [],
       done: false,
       failed: false,
@@ -94,6 +167,16 @@ export class SpeechPlayer {
     this.queue.push(sentence);
     void this.stream(sentence, this.aborter.signal);
     if (!this.running) void this.run();
+  }
+
+  /** Removes a queued sentence that has not started playing; true when one was dropped. */
+  drop(text: string): boolean {
+    const sentence = this.queue.find((entry) => entry.text === text && !entry.started);
+    if (sentence === undefined) return false;
+    this.queue = this.queue.filter((entry) => entry !== sentence);
+    voiceLog("voice", "say.dropped", { text });
+    sentence.wake?.();
+    return true;
   }
 
   /** Stops the reply now; `reason` goes to the session log (tap, barge-in, end of call). */
@@ -105,6 +188,8 @@ export class SpeechPlayer {
         dropped: this.queue.slice(1).map((sentence) => sentence.text),
       });
     }
+    const wasRunning = this.running;
+    const cut = this.current;
     this.current = null;
     this.endsAt = 0;
     this.generation += 1;
@@ -112,9 +197,41 @@ export class SpeechPlayer {
     this.aborter = new AbortController();
     for (const sentence of this.queue) sentence.wake?.();
     this.queue = [];
-    for (const source of this.sources) source.stop();
-    this.sources.clear();
+    this.silence();
+    if (wasRunning) {
+      this.logEnd(reason.startsWith("barge") ? "barge" : reason, { reason, cut });
+    }
     this.setRunning(false);
+  }
+
+  /** Stops and forgets every scheduled piece (ours, so their `ended` is not an early end). */
+  private silence(): void {
+    for (const piece of this.pieces) {
+      piece.source.onended = null;
+      try {
+        piece.source.stop();
+      } catch {
+        // Never started (context suspended): nothing to stop.
+      }
+    }
+    this.pieces.clear();
+    this.playhead = 0;
+    this.wakeSettled();
+  }
+
+  private wakeSettled(): void {
+    const settled = this.settled;
+    this.settled = null;
+    settled?.();
+  }
+
+  private logEnd(cause: PlaybackEndCause, data: Record<string, unknown> = {}): void {
+    voiceLog("voice", "playback.end", {
+      cause,
+      context: this.context.state,
+      failed: this.failedInRun,
+      ...data,
+    });
   }
 
   private async stream(sentence: QueuedSentence, signal: AbortSignal): Promise<void> {
@@ -176,8 +293,12 @@ export class SpeechPlayer {
 
   private async run(): Promise<void> {
     const generation = this.generation;
+    if (!this.running) this.failedInRun = 0;
     this.setRunning(true);
-    let playhead = 0;
+    if ((this.context.state as string) !== "running") {
+      this.stalledSince ??= performance.now();
+      this.resumeContext();
+    }
     while (this.queue.length > 0) {
       const sentence = this.queue[0]!;
       let played = 0;
@@ -186,6 +307,7 @@ export class SpeechPlayer {
       for (;;) {
         if (played < sentence.chunks.length) {
           if (!announced) {
+            sentence.started = true;
             heard = { text: sentence.text, until: performance.now() };
             this.recent.push(heard);
             announced = true;
@@ -197,43 +319,142 @@ export class SpeechPlayer {
               waitMs: Math.round(performance.now() - sentence.queuedAt),
             });
           }
-          playhead = this.schedule(sentence.chunks[played]!, playhead);
+          this.schedule(sentence.chunks[played]!);
           if (heard !== null) heard.until = this.endsAt;
           played += 1;
           continue;
         }
-        if (sentence.done) break;
+        if (sentence.done) {
+          if (sentence.failed) this.failedInRun += 1;
+          break;
+        }
         await new Promise<void>((resolve) => {
           sentence.wake = resolve;
         });
         if (generation !== this.generation) return;
+        // Dropped before it started (drop()): go on with the next one.
+        if (!this.queue.includes(sentence)) break;
       }
-      this.queue.shift();
+      if (this.queue[0] === sentence) this.queue.shift();
     }
-    // Let the last scheduled audio finish before reporting silence.
-    const remaining = playhead - this.context.currentTime;
-    if (remaining > 0) await new Promise((resolve) => window.setTimeout(resolve, remaining * 1000));
+    // The reply ends when its audio has really played: on the context's clock, not a wall timer.
+    const cause = await this.played(generation);
     if (generation !== this.generation) return;
     if (this.queue.length > 0) return void this.run();
+    this.logEnd(cause === "finished" && this.failedInRun > 0 ? "error" : cause, {
+      last: this.current,
+    });
     this.current = null;
     this.setRunning(false);
   }
 
-  private schedule(samples: Float32Array<ArrayBuffer>, playhead: number): number {
+  /** Waits until every scheduled piece has played; "ctx-interrupted" if the context never came back. */
+  private async played(generation: number): Promise<PlaybackEndCause> {
+    for (;;) {
+      if (generation !== this.generation) return "stopped";
+      const running = (this.context.state as string) === "running";
+      if (running && this.context.currentTime >= this.playhead - 0.005) {
+        // Some WebKit builds drop `ended` for pieces that finished: the clock is the truth.
+        this.pieces.clear();
+        return "finished";
+      }
+      if (!running && this.stalledSince !== null) {
+        if (performance.now() - this.stalledSince > STALLED_GIVE_UP_MS) {
+          this.silence();
+          return "ctx-interrupted";
+        }
+      }
+      await new Promise<void>((resolve) => {
+        this.settled = resolve;
+        const left = running ? (this.playhead - this.context.currentTime) * 1000 : 250;
+        window.setTimeout(resolve, Math.min(250, Math.max(20, left)));
+      });
+      this.settled = null;
+    }
+  }
+
+  /**
+   * Puts back whatever an interruption cut short: every piece not yet fully played is stopped and
+   * scheduled again from where it stopped, in order, from now.
+   */
+  private recover(why: string): void {
+    if ((this.context.state as string) !== "running" || this.pieces.size === 0) return;
+    const now = this.context.currentTime;
+    const cut = [...this.pieces].filter((piece) => piece.source.onended === null);
+    if (cut.length === 0) return;
+    const pending = [...this.pieces].sort((a, b) => a.startAt - b.startAt);
+    for (const piece of pending) {
+      piece.source.onended = null;
+      try {
+        piece.source.stop();
+      } catch {
+        // Not started yet.
+      }
+    }
+    this.pieces.clear();
+    this.playhead = 0;
+    let replayedS = 0;
+    for (const piece of pending) {
+      const playedS = Math.max(0, now - piece.startAt);
+      const from = Math.min(piece.samples.length, Math.floor(playedS * TTS_SAMPLE_RATE));
+      if (piece.samples.length - from < 240) continue;
+      const rest = piece.samples.slice(from);
+      replayedS += rest.length / TTS_SAMPLE_RATE;
+      this.schedule(rest);
+    }
+    voiceLog("voice", "playback.replayed", {
+      why,
+      pieces: pending.length,
+      seconds: Math.round(replayedS * 100) / 100,
+      current: this.current,
+    });
+  }
+
+  private schedule(samples: Float32Array<ArrayBuffer>): void {
     const buffer = this.context.createBuffer(1, samples.length, TTS_SAMPLE_RATE);
     buffer.copyToChannel(samples, 0);
     const source = this.context.createBufferSource();
     source.buffer = buffer;
     source.connect(this.output);
-    const startAt = Math.max(playhead, this.context.currentTime + SCHEDULE_AHEAD_S);
-    source.onended = () => this.sources.delete(source);
-    this.sources.add(source);
+    const startAt = Math.max(this.playhead, this.context.currentTime + SCHEDULE_AHEAD_S);
+    const piece: ScheduledPiece = {
+      source,
+      samples,
+      startAt,
+      endAt: startAt + buffer.duration,
+    };
+    const generation = this.generation;
+    source.onended = () => this.onPieceEnded(piece, generation);
+    this.pieces.add(piece);
     source.start(startAt);
+    this.playhead = piece.endAt;
     this.endsAt = Math.max(
       this.endsAt,
-      performance.now() + (startAt + buffer.duration - this.context.currentTime) * 1000,
+      performance.now() + (piece.endAt - this.context.currentTime) * 1000,
     );
-    return startAt + buffer.duration;
+  }
+
+  private onPieceEnded(piece: ScheduledPiece, generation: number): void {
+    if (generation !== this.generation || !this.pieces.has(piece)) return;
+    const now = this.context.currentTime;
+    if (now < piece.endAt - EARLY_END_S) {
+      // Cut short by the platform, not by us: mark it and play the rest again once the context runs.
+      piece.source.onended = null;
+      voiceLog("voice", "playback.cut-short", {
+        context: this.context.state,
+        missingS: Math.round((piece.endAt - now) * 100) / 100,
+        current: this.current,
+        visibility: document.visibilityState,
+      });
+      if ((this.context.state as string) === "running") this.recover("cut short");
+      else {
+        this.stalledSince ??= performance.now();
+        this.resumeContext();
+      }
+      return;
+    }
+    this.pieces.delete(piece);
+    if (this.pieces.size === 0) this.wakeSettled();
   }
 
   private setRunning(running: boolean): void {

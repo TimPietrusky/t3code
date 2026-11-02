@@ -6,6 +6,8 @@
 import { type SpeechEngine, speechEngine, subscribeSpeechEngine } from "./engine";
 
 export const STT_SAMPLE_RATE = 16_000;
+// Five 20 ms frames: the most audio one message carries.
+const FRAMES_PER_MESSAGE = 5;
 
 const COMMIT_TIMEOUT_MS = 3_000;
 const CONNECT_TIMEOUT_MS = 4_000;
@@ -107,6 +109,16 @@ export class RealtimeStt {
    * commits) before ours: the start of the same utterance, so it leads its partials and its result.
    */
   private carry: string[] = [];
+  /** The open local socket transcribes only what its voice detection called speech. */
+  private vad = false;
+
+  /**
+   * Whether a transcript can only come from real speech: Scribe always (its own voice detection),
+   * local speech only once its service runs Silero in front of Parakeet (`vad` on session start).
+   */
+  get speechOnly(): boolean {
+    return this.engine !== "local" || (this.socket !== null && this.vad);
+  }
 
   /**
    * Opens the socket ahead of time so the first utterance does not wait for it. Called as each
@@ -189,14 +201,19 @@ export class RealtimeStt {
     }
     const chunks = this.unsent;
     this.unsent = [];
-    socket.send(
-      JSON.stringify({
-        message_type: "input_audio_chunk",
-        audio_base_64: base64OfPcm(chunks),
-        commit,
-        sample_rate: STT_SAMPLE_RATE,
-      }),
-    );
+    // At most ~100 ms per message: Scribe drops a large one without a word (2 Nov: a 2.8 s message
+    // came back empty), and audio buffered while the socket reconnected is often longer than that.
+    for (let start = 0; start < chunks.length; start += FRAMES_PER_MESSAGE) {
+      const last = start + FRAMES_PER_MESSAGE >= chunks.length;
+      socket.send(
+        JSON.stringify({
+          message_type: "input_audio_chunk",
+          audio_base_64: base64OfPcm(chunks.slice(start, start + FRAMES_PER_MESSAGE)),
+          commit: commit && last,
+          sample_rate: STT_SAMPLE_RATE,
+        }),
+      );
+    }
     return true;
   }
 
@@ -246,13 +263,15 @@ export class RealtimeStt {
   }
 
   private onMessage(event: MessageEvent): void {
-    let message: { message_type?: string; text?: string; error?: string };
+    let message: { message_type?: string; text?: string; error?: string; vad?: unknown };
     try {
       message = JSON.parse(String(event.data));
     } catch {
       return;
     }
-    if (message.message_type === "partial_transcript") {
+    if (message.message_type === "session_started") {
+      this.vad = message.vad === true;
+    } else if (message.message_type === "partial_transcript") {
       if (message.text) this.onPartial?.([...this.carry, message.text].join(" "));
     } else if (message.message_type === "committed_transcript") {
       const text = message.text?.trim() ?? "";

@@ -28,11 +28,17 @@ if [ "${1:-}" = "pair" ]; then
   scopes=()
   # A browser reaching T3 from outside this Mac gets only what voice needs: threads, no
   # terminal, files, settings or access management.
-  [ -n "${T3VOICE_PUBLIC_ORIGIN:-}" ] && scopes=(--scope orchestration:read --scope orchestration:operate)
+  if [ -n "${T3VOICE_PUBLIC_ORIGIN:-}" ]; then scopes=(--scope orchestration:read --scope orchestration:operate); fi
   out="${T3VOICE_PAIR_FILE:-/tmp/t3voice/pair-link.txt}"
   mkdir -p "$(dirname "$out")"
-  token="$("$T3" pair --ttl 15m --label "t3 voice (${origin#*://})" ${scopes[@]+"${scopes[@]}"} | sed -n 's/.*token=\([^[:space:]]*\).*/\1/p' | head -1)"
-  [ -n "$token" ] || { echo "Could not mint a pairing token." >&2; exit 1; }
+  # --base-dir: run from a linked worktree, `t3 pair` would look for a dev server inside it.
+  if ! minted="$("$T3" pair --base-dir "${T3CODE_HOME:-$HOME/.t3}" --ttl 15m --label "t3 voice (${origin#*://})" ${scopes[@]+"${scopes[@]}"} 2>&1)"; then
+    echo "t3 pair failed:" >&2
+    printf '%s\n' "$minted" | grep -v '[█▀▄]' | sed 's/token=[^[:space:]]*/token=<hidden>/' >&2
+    exit 1
+  fi
+  token="$(printf '%s\n' "$minted" | sed -n 's/.*token=\([^[:space:]]*\).*/\1/p' | head -1)"
+  [ -n "$token" ] || { echo "Could not read a pairing token from t3 pair's output." >&2; exit 1; }
   (umask 077 && printf '%s/pair#token=%s\n' "$origin" "$token" > "$out")
   echo "Pairing link written to $out (valid 15 minutes, one use)."
   exit 0
