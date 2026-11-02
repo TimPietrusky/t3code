@@ -44,6 +44,15 @@ const BLIP_IGNORE_MS = 180;
 // A transcript taken over the reply counts as Tim when this share of its words are his (or it is short).
 const MIN_THEIR_SHARE = 0.3;
 const MAX_SHORT_INTERRUPTION = 6;
+// Tim's close voice during a reply silences it at once (Tim, 2 Nov: "when I start talking, you stop
+// talking immediately"). With no word of his in this long after the gate closes, or at most
+// HOLD_MAX_MS, it was noise and the reply goes on.
+const HOLD_RELEASE_MS = 700;
+const HOLD_MAX_MS = 5_000;
+// Our reply coming back through a speaker is quieter at the mic than the reply itself; Tim talking
+// into it is not. A hold needs the mic within this many dB of what is playing, for HOLD_OVER_MS.
+const HOLD_OVER_REPLY_DB = 3;
+const HOLD_OVER_MS = 60;
 // A segment never runs longer than this, even while the gate stays open on loud echo.
 const MAX_SEGMENT_MS = 6_000;
 // Under this much speech a lone word is a noise the recogniser named ("you", "the").
@@ -142,6 +151,14 @@ function interruptingWords(heard: string, spoken: ReadonlyArray<string>): Readon
  * Whether a transcript taken while the reply played has Tim in it: a run of his words, and enough
  * of them. A long transcript of our own echo always has a few garbled words; Tim's are a real share.
  */
+/**
+ * While a reply is on hold and the gate opened on Tim: one word of his that is not our echo nor
+ * "mm-hmm" stops it. A hold alone (voiced, not open) never stops anything: loud echo gets that far.
+ */
+function isTakeover(heard: string, spoken: ReadonlyArray<string>): boolean {
+  return !isNoisePhrase(heard) && interruptingWords(heard, spoken).length >= 1;
+}
+
 function isInterruption(heard: string, spoken: ReadonlyArray<string>): boolean {
   const all = heard.toLowerCase().match(/\p{L}[\p{L}'’]*|\d+/gu) ?? [];
   if (isNoisePhrase(heard)) return false;
@@ -184,6 +201,14 @@ export class VoiceSession {
   private probeMs = 0;
   /** When the gate last opened on Tim's voice while a reply played (performance time), or 0. */
   private closeVoiceAt = 0;
+  /** When the reply went on hold for Tim, and when the gate last heard him close since. */
+  private holdAt = 0;
+  private heldVoiceAt = 0;
+  private holdArmed = true;
+  private overReplyMs = 0;
+  private replyDbs: number[] = [];
+  /** When the gate last opened on Tim over a reply (not just voiced). */
+  private strongVoiceAt = 0;
   private rejectedInSegment = false;
   private pendingTranscriptions = 0;
   private phase: VoicePhase = "off";
@@ -360,6 +385,39 @@ export class VoiceSession {
       });
     }
 
+    // Tim's close voice over the reply: it goes quiet now; his words make it a stop, else it goes on.
+    // Voiced is ~90 ms over the barge-in bar; a new hold needs a quiet moment since the last one.
+    const close = this.gate.voiced || this.gate.open;
+    if (!close) this.holdArmed = true;
+    // Against the reply's loudest moment in the last ~200 ms: its echo arrives late and rings on.
+    this.replyDbs.push(20 * Math.log10(player.level() + 1e-9));
+    if (this.replyDbs.length > 10) this.replyDbs.shift();
+    const overReply =
+      20 * Math.log10(level + 1e-9) >= Math.max(...this.replyDbs) - HOLD_OVER_REPLY_DB;
+    this.overReplyMs = close && overReply ? this.overReplyMs + FRAME_MS : 0;
+    if (decision?.opened && decision.by === "speak") this.closeVoiceAt = this.strongVoiceAt = now;
+    if (
+      this.overReplyMs >= HOLD_OVER_MS &&
+      this.holdArmed &&
+      replyAudible &&
+      player.speaking &&
+      !player.holding
+    ) {
+      if (this.stt.speechOnly) {
+        this.holdArmed = false;
+        this.holdAt = now;
+        player.hold();
+      }
+    }
+    if (player.holding) {
+      if (this.gate.open || this.gate.voiced) this.heldVoiceAt = now;
+      else if (this.heldVoiceAt < this.holdAt) this.heldVoiceAt = this.holdAt;
+      if (now - this.heldVoiceAt >= HOLD_RELEASE_MS || now - this.holdAt >= HOLD_MAX_MS) {
+        voiceLog("voice", "barge.released", { heldMs: Math.round(now - this.holdAt) });
+        player.release();
+      }
+    }
+
     if (this.probing && !this.stt.speechOnly) {
       // Switched to a local service without voice detection mid-segment: nothing here counts.
       this.probing = false;
@@ -446,6 +504,10 @@ export class VoiceSession {
     this.updatePhase();
   }
 
+  private strongVoice(): boolean {
+    return this.gate.open || performance.now() - this.strongVoiceAt < BARGE_WINDOW_MS;
+  }
+
   private closeVoiceRecently(): boolean {
     return this.gate.open || performance.now() - this.closeVoiceAt < BARGE_WINDOW_MS;
   }
@@ -458,6 +520,10 @@ export class VoiceSession {
     }
     if (!this.probing) return;
     const spoken = this.player?.recentlySpoken() ?? [];
+    if (this.player?.holding && this.strongVoice() && isTakeover(text, spoken)) {
+      this.bargeIn("Tim took over", text);
+      return;
+    }
     if (!isInterruption(text, spoken)) return;
     if (this.closeVoiceRecently()) {
       this.bargeIn("close voice and new words", text);
@@ -488,6 +554,7 @@ export class VoiceSession {
   private endProbe(): void {
     this.probing = false;
     const closeVoice = this.closeVoiceRecently();
+    const strong = this.strongVoice();
     const ms = this.probeMs;
     void this.stt
       .commit({ fallback: false })
@@ -495,7 +562,8 @@ export class VoiceSession {
         voiceLog("voice", "probe.segment", { ms, chars: text.trim().length, closeVoice });
         if (this.stream === null || text.trim() === "") return;
         const spoken = this.player?.recentlySpoken() ?? [];
-        if (!isInterruption(text, spoken)) return;
+        const takeover = Boolean(this.player?.holding) && strong && isTakeover(text, spoken);
+        if (!takeover && !isInterruption(text, spoken)) return;
         if (!closeVoice) {
           voiceLog("voice", "barge.rejected", {
             reason: "words without a close voice",
@@ -588,7 +656,7 @@ export class VoiceSession {
       ? "no real words"
       : this.engine === "local" && isNoisePhrase(heard)
         ? "a phrase made up from noise"
-        : info.duringReply && isEchoOfSpoken(heard, spoken)
+        : isEchoOfSpoken(heard, spoken)
           ? "our own words coming back"
           : words.length === 1 && info.speechMs < MIN_LONE_WORD_MS
             ? "a lone word from a short noise"

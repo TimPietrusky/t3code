@@ -111,14 +111,18 @@ function spokenRuns(recentlySpoken: ReadonlyArray<string>): ReadonlyArray<Readon
 }
 
 /** Indexes (into `heard`) of words that sit in a run of ECHO_RUN or more of a spoken sentence. */
-function echoedWordIndexes(heard: ReadonlyArray<string>, recentlySpoken: ReadonlyArray<string>) {
+function echoedWordIndexes(
+  heard: ReadonlyArray<string>,
+  recentlySpoken: ReadonlyArray<string>,
+  run = ECHO_RUN,
+) {
   const echoed = new Set<number>();
   for (const said of spokenRuns(recentlySpoken)) {
     for (let i = 0; i < heard.length; i += 1) {
       for (let j = 0; j < said.length; j += 1) {
         let n = 0;
         while (i + n < heard.length && j + n < said.length && heard[i + n] === said[j + n]) n += 1;
-        if (n >= ECHO_RUN) for (let k = 0; k < n; k += 1) echoed.add(i + k);
+        if (n >= run) for (let k = 0; k < n; k += 1) echoed.add(i + k);
       }
     }
   }
@@ -149,13 +153,17 @@ export function stripEcho(transcript: string, recentlySpoken: ReadonlyArray<stri
 
 /**
  * Whether a transcript is most likely our own reply picked up by the microphone: it repeats the
- * reply word for word (a run of ECHO_RUN) and nearly all of its words are the reply's.
+ * reply word for word (a run of ECHO_RUN) and nearly all of its words are the reply's. A shorter one
+ * (3 words) only when all of it is a run of the reply ("sure, go ahead." coming back); with fewer
+ * real words it is Tim ("yeah, keep it." after "keep it?").
  */
 export function isEchoOfSpoken(transcript: string, recentlySpoken: ReadonlyArray<string>): boolean {
   const heard = words(transcript).filter((word) => !FILLER.test(word));
-  if (heard.length < ECHO_RUN) return false;
-  const echoed = echoedWordIndexes(heard, recentlySpoken);
-  return echoed.size / heard.length >= 0.8;
+  if (heard.length < 3) return false;
+  if (heard.length < ECHO_RUN) {
+    return echoedWordIndexes(heard, recentlySpoken, heard.length).size === heard.length;
+  }
+  return echoedWordIndexes(heard, recentlySpoken).size / heard.length >= 0.8;
 }
 
 // What local speech-to-text makes of breath and noise (2 Nov eval: "I'm sorry." 22 times in one walk).

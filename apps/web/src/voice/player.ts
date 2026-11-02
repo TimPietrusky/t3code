@@ -47,6 +47,12 @@ export class SpeechPlayer {
   private readonly frame: Float32Array<ArrayBuffer>;
   private queue: QueuedSentence[] = [];
   private pieces = new Set<ScheduledPiece>();
+  /** The reply taken off the air by hold(), in order, until release() or stop(). */
+  private held: Array<{
+    readonly samples: Float32Array<ArrayBuffer>;
+    readonly sentence: QueuedSentence;
+    readonly index: number;
+  }> | null = null;
   /** Where the next piece starts on the context's clock. */
   private playhead = 0;
   /** Wakes the run's wait for the last piece to end. */
@@ -188,6 +194,49 @@ export class SpeechPlayer {
     return true;
   }
 
+  get holding(): boolean {
+    return this.held !== null;
+  }
+
+  /** Silences the reply at once but keeps its place: Tim may be taking over (then stop or release). */
+  hold(): void {
+    if (!this.running || this.held !== null) return;
+    const now = this.context.currentTime;
+    const pending = [...this.pieces].sort((a, b) => a.startAt - b.startAt);
+    for (const piece of pending) {
+      piece.source.onended = null;
+      try {
+        piece.source.stop();
+      } catch {
+        // Not started yet.
+      }
+    }
+    this.pieces.clear();
+    this.playhead = 0;
+    this.held = [];
+    for (const piece of pending) {
+      const from = Math.floor(Math.max(0, now - piece.startAt) * TTS_SAMPLE_RATE);
+      if (piece.samples.length - from < 240) continue;
+      this.held.push({
+        samples: from === 0 ? piece.samples : piece.samples.slice(from),
+        sentence: piece.sentence,
+        index: piece.index,
+      });
+    }
+    this.endsAt = performance.now();
+    voiceLog("voice", "playback.hold", { current: this.current });
+  }
+
+  /** Not Tim after all (no words of his): the reply goes on from where hold() took it. */
+  release(): void {
+    const held = this.held;
+    if (held === null) return;
+    this.held = null;
+    for (const piece of held) this.schedule(piece.samples, piece.sentence, piece.index);
+    voiceLog("voice", "playback.release", { current: this.current });
+    this.wakeSettled();
+  }
+
   /** Stops the reply now; `reason` goes to the session log (tap, barge-in, end of call). */
   stop(reason = "stop"): void {
     if (this.running || this.queue.length > 0) {
@@ -206,6 +255,7 @@ export class SpeechPlayer {
     this.aborter = new AbortController();
     for (const sentence of this.queue) sentence.wake?.();
     this.queue = [];
+    this.held = null;
     this.silence();
     if (wasRunning) {
       this.logEnd(reason.startsWith("barge") ? "barge" : reason, { reason, cut });
@@ -363,6 +413,15 @@ export class SpeechPlayer {
     for (;;) {
       if (generation !== this.generation) return "stopped";
       const running = (this.context.state as string) === "running";
+      if (this.held !== null) {
+        // On hold while Tim may be taking over: not finished, not stalled.
+        await new Promise<void>((resolve) => {
+          this.settled = resolve;
+          window.setTimeout(resolve, 100);
+        });
+        this.settled = null;
+        continue;
+      }
       if (running && this.context.currentTime >= this.playhead - 0.005) {
         // Some WebKit builds drop `ended` for pieces that finished: the clock is the truth.
         this.pieces.clear();
@@ -445,6 +504,11 @@ export class SpeechPlayer {
     sentence: QueuedSentence,
     index: number,
   ): void {
+    if (this.held !== null) {
+      // On hold: the reply's next audio waits with the rest.
+      this.held.push({ samples, sentence, index });
+      return;
+    }
     const buffer = this.context.createBuffer(1, samples.length, TTS_SAMPLE_RATE);
     buffer.copyToChannel(samples, 0);
     const source = this.context.createBufferSource();
