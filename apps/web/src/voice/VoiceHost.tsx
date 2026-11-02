@@ -50,6 +50,10 @@ export function VoiceHost() {
   const [config, setConfig] = useState<VoiceConfig | null>(null);
   const [phase, setPhase] = useState<VoicePhase>("off");
   const [error, setError] = useState<string | null>(null);
+  // Between the tap and a live microphone (permission, speech socket): Presence's connecting look.
+  const [starting, setStarting] = useState(false);
+  // When Tim last cut a reply off; the bar shows Presence's stopped look.
+  const [stoppedAt, setStoppedAt] = useState(0);
   const engine = useSpeechEngine();
   // Why local speech cannot be used right now (service down or loading); null when it is ready.
   const [localProblem, setLocalProblem] = useState<string | null>(null);
@@ -201,6 +205,7 @@ export function VoiceHost() {
     // While a reply plays, a tap only stops the reply; on a phone its speaker sits next to the mic.
     if (current?.active && phase === "speaking") {
       current.stopSpeaking();
+      setStoppedAt(Date.now());
       return;
     }
     if (current?.active) {
@@ -219,11 +224,14 @@ export function VoiceHost() {
     });
     sessionRef.current = session;
     sessionStartedAtRef.current = Date.now();
+    setStarting(true);
     try {
       await session.start();
     } catch (cause) {
       sessionRef.current = null;
       setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setStarting(false);
     }
   });
 
@@ -278,7 +286,13 @@ export function VoiceHost() {
         : "ElevenLabs needs scripts/t3voice.sh";
   const message = error ?? unavailable;
   const state: VoiceBarState =
-    message !== null ? "error" : phase === "listening" && thinking ? "thinking" : phase;
+    message !== null
+      ? "error"
+      : starting
+        ? "connecting"
+        : phase === "listening" && thinking
+          ? "thinking"
+          : phase;
 
   return (
     <>
@@ -297,6 +311,8 @@ export function VoiceHost() {
         bottom={clearance}
         onPress={() => void toggle()}
         toggle={<VoiceEngineToggle onChange={() => setError(null)} />}
+        analysis={() => sessionRef.current?.analysis() ?? null}
+        stoppedAt={stoppedAt}
       />
     </>
   );

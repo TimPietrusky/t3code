@@ -39,9 +39,16 @@ export class SpeechPlayer {
     private readonly engine: () => SpeechEngine,
   ) {
     this.output = context.createAnalyser();
-    this.output.fftSize = 512;
+    // Presence's wave reads a 2048-point spectrum (1024 bins) at the analyser's usual smoothing.
+    this.output.fftSize = 2048;
+    this.output.smoothingTimeConstant = 0.8;
     this.output.connect(context.destination);
     this.frame = new Float32Array(this.output.fftSize);
+  }
+
+  /** What is being played, for the bar's wave. */
+  get analyser(): AnalyserNode {
+    return this.output;
   }
 
   get speaking(): boolean {

@@ -1,293 +1,38 @@
-/* t3 voice's bar, in Presence's call-frame look (agent-dashboard/public/presence/bar.css) with a
-   green HUD so it reads as t3 voice at a glance: cut corners, a 1px edge, the strip at the left end,
-   a tick rail, the state tab on the top edge and the key behind a straight divider. Static by design:
-   no waves or looping animations. Oxanium is OFL (SIL Open Font License 1.1). */
-@font-face {
-  font-family: "Oxanium";
-  font-style: normal;
-  font-weight: 200 800;
-  font-display: swap;
-  src: url("./fonts/oxanium-var-latin.woff2") format("woff2");
-}
+/* t3 voice's additions to Presence's bar (presence/presence.css stays a verbatim copy). */
 
-[data-t3voice-bar] {
-  --hud: #3dff8f;
-  --hud-2: rgba(61, 255, 143, 0.66);
-  --hud-3: rgba(61, 255, 143, 0.34);
-  --hud-4: rgba(61, 255, 143, 0.13);
-  --hud-ink: #04170c;
-  --surface: #0b0f0d;
-  --ink: #d9f7e6;
-  --ink-3: rgba(217, 247, 230, 0.55);
-  --cut: 10px;
-  --key-w: 54px;
-  --strip: 5px;
-  --tab-h: 18px;
-  --edge: rgba(61, 255, 143, 0.5);
-  position: fixed;
+/* Above T3's own layers. */
+[data-t3voice-presence] .bar {
   z-index: 50;
-  right: max(0.75rem, env(safe-area-inset-right));
-  bottom: max(0.75rem, env(safe-area-inset-bottom));
-  width: 320px;
-  padding-top: var(--tab-h);
-  font-family: "Oxanium", ui-monospace, monospace;
-}
-@media (max-width: 640px) {
-  [data-t3voice-bar] {
-    left: max(0.75rem, env(safe-area-inset-left));
-    width: auto;
-  }
-}
-[data-t3voice-bar][data-state="off"] {
-  --edge: rgba(61, 255, 143, 0.28);
-}
-[data-t3voice-bar][data-state="hearing"],
-[data-t3voice-bar][data-state="speaking"] {
-  --edge: rgba(61, 255, 143, 0.85);
-}
-[data-t3voice-bar][data-state="error"] {
-  --hud: #ffb45f;
-  --hud-2: rgba(255, 180, 95, 0.66);
-  --hud-3: rgba(255, 180, 95, 0.34);
-  --hud-4: rgba(255, 180, 95, 0.13);
-  --edge: rgba(255, 180, 95, 0.6);
 }
 
-/* The frame is the one button: tap to start, to stop a reply, or to stop listening. */
-[data-t3v="frame"] {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 46px;
-  padding: 1px;
-  border: 0;
-  cursor: pointer;
-  color: var(--ink);
-  background: var(--edge);
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-[data-t3v="frame"],
-[data-t3v="room"] {
-  clip-path: polygon(
-    var(--cut) 0,
-    100% 0,
-    100% calc(100% - var(--cut)),
-    calc(100% - var(--cut)) 100%,
-    0 100%,
-    0 var(--cut)
-  );
-}
-[data-t3v="frame"]:focus-visible {
-  outline: 0;
-  --edge: var(--hud);
-}
-[data-t3v="frame"]:disabled {
-  cursor: default;
-}
-[data-t3v="room"] {
-  position: relative;
-  display: flex;
-  align-items: center;
-  height: 100%;
-  overflow: hidden;
-  padding: 0 calc(var(--key-w) + 10px) 0 calc(var(--strip) + 12px);
-  background: linear-gradient(90deg, var(--hud-4), transparent 38%), var(--surface);
-}
-[data-t3v="room"]::after {
-  content: "";
+/* The slot for small controls (the engine switch): a tab on the top edge left of the timer, in the
+   timer tab's look (bar.css .fr-tmr). Its content reads the frame's --hud colours. */
+[data-t3voice-presence] .fr-slot {
   position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.025) 0 1px,
-    transparent 1px 3px
-  );
-}
-[data-t3v="strip"] {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: var(--strip);
-  background: var(--hud);
-  opacity: 0.85;
-}
-[data-t3voice-bar][data-state="off"] [data-t3v="strip"] {
-  opacity: 0.3;
-}
-[data-t3v="rail"] {
-  position: absolute;
-  left: 16px;
-  right: calc(var(--key-w) + 12px);
-  bottom: 0;
-  height: 6px;
-  background:
-    repeating-linear-gradient(90deg, var(--hud-3) 0 1px, transparent 1px 8px) 0 100% / 100% 3px
-      no-repeat,
-    repeating-linear-gradient(90deg, var(--hud-2) 0 1px, transparent 1px 64px) 0 100% / 100% 6px
-      no-repeat;
-  opacity: 0.6;
-}
-[data-t3v="line"] {
-  position: relative;
-  z-index: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ink-3);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Standby: the room hatched like a panel on standby, a cut plate in the middle. */
-[data-t3v="hatch"] {
-  position: absolute;
-  inset: 0 0 0 var(--strip);
-  background: repeating-linear-gradient(-45deg, var(--hud-4) 0 1px, transparent 1px 7px);
-}
-[data-t3v="plate"] {
-  position: relative;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 26px;
-  margin: 0 auto;
-  padding: 0 16px 0 13px;
-  color: var(--hud);
-  background: var(--surface);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  text-shadow: 0 0 10px var(--hud-3);
-  box-shadow:
-    inset 0 0 0 1px var(--hud-2),
-    0 0 0 4px var(--surface);
-  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
-}
-[data-t3v="plate"] svg {
-  width: 13px;
-  height: 13px;
-}
-
-/* The key: the frame's right end, behind a straight divider. Filled while voice is on. */
-[data-t3v="key"] {
-  position: absolute;
-  z-index: 2;
-  right: 1px;
-  top: 1px;
-  bottom: 1px;
-  width: var(--key-w);
-  display: grid;
-  place-items: center;
-  color: var(--hud-2);
-  background: var(--hud-4);
-}
-[data-t3v="key"]::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 1.5px;
-  background: var(--hud-3);
-}
-[data-t3v="key"] svg {
-  width: 20px;
-  height: 20px;
-}
-[data-t3voice-bar]:not([data-state="off"]) [data-t3v="key"] {
-  color: var(--hud-ink);
-  background: var(--hud);
-}
-[data-t3voice-bar]:not([data-state="off"]) [data-t3v="key"]::before {
-  display: none;
-}
-
-/* The state tab on the top edge: a glyph and a word. */
-[data-t3v="tab"] {
-  position: absolute;
-  z-index: 3;
-  left: calc(var(--cut) + 6px);
-  top: 1px;
+  z-index: 4;
+  right: calc(var(--key-w) + 7px);
+  bottom: calc(100% - 1px);
   height: var(--tab-h);
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 1px 17px 0 9px;
-  background: var(--hud-2);
-  clip-path: polygon(0 0, calc(100% - 11px) 0, 100% 100%, 0 100%);
-  pointer-events: none;
+  padding: 1px 6px 0;
+  background: linear-gradient(var(--hud-3) calc(100% - 1px), transparent 0);
+  clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%);
+  --surface: var(--color-surface);
 }
-[data-t3v="tab"]::before {
-  content: "";
-  position: absolute;
-  inset: 1px 1.2px -1px 1px;
-  background: var(--surface);
-  clip-path: polygon(0 0, calc(100% - 11.5px) 0, 100% 100%, 0 100%);
-}
-[data-t3v="tab"] > * {
-  position: relative;
-}
-[data-t3v="tab"][data-hot] {
-  background: var(--hud);
-  box-shadow: 0 0 16px var(--hud-3);
-}
-[data-t3v="tab"][data-hot]::before {
+[data-t3voice-presence] .fr-slot:empty {
   display: none;
 }
-[data-t3v="word"] {
-  color: var(--hud);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-[data-t3v="tab"][data-hot] [data-t3v="word"] {
-  color: var(--hud-ink);
-  font-weight: 700;
-}
-[data-t3v="glyph"] {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 9px;
-}
-[data-t3v="glyph"] i {
-  width: 2px;
-  background: var(--hud);
-}
-[data-t3v="tab"][data-hot] [data-t3v="glyph"] i {
-  background: var(--hud-ink);
-}
-[data-t3v="glyph"] i:nth-child(1) {
-  height: 45%;
-}
-[data-t3v="glyph"] i:nth-child(2) {
-  height: 100%;
-}
-[data-t3v="glyph"] i:nth-child(3) {
-  height: 70%;
-}
-[data-t3v="glyph"] i:nth-child(4) {
-  height: 35%;
-}
-[data-t3v="glyph"][data-hollow] {
-  width: 7px;
-  height: 7px;
-  box-shadow: inset 0 0 0 1.2px var(--hud-2);
-}
-
-/* Slot for the engine switch (VoiceEngineToggle styles itself), on the top edge at the right. */
-[data-t3v="toggle"] {
+[data-t3voice-presence] .fr-slot::before {
+  content: "";
   position: absolute;
-  z-index: 3;
-  right: 0;
-  top: calc(var(--tab-h) - 16px);
+  inset: 1px 1px 1px 1.5px;
+  background: var(--color-surface);
+  clip-path: polygon(5.5px 0, 100% 0, 100% 100%, 0 100%);
+}
+[data-t3voice-presence] .fr-slot > * {
+  position: relative;
+}
+[data-t3voice-presence] .fr[data-look~="off"] .fr-slot {
+  opacity: 0.8;
 }

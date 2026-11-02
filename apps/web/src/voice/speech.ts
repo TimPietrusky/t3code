@@ -83,6 +83,16 @@ export class VoiceSession {
   private context: AudioContext | null = null;
   private capture: AudioWorkletNode | null = null;
   private player: SpeechPlayer | null = null;
+  private input: AnalyserNode | null = null;
+  private micLevel = 0;
+  // The bar's wave reads these every frame; allocated once.
+  private readonly spectrum = {
+    input: new Uint8Array(1024),
+    output: new Uint8Array(1024),
+    inputWave: new Float32Array(2048),
+    outputWave: new Float32Array(2048),
+    rate: 48_000,
+  };
   private readonly stt = new RealtimeStt();
   private preRoll: Int16Array[] = [];
   private noiseFloor = MIN_LEVEL / 3;
@@ -138,7 +148,12 @@ export class VoiceSession {
     const capture = new AudioWorkletNode(context, "t3voice-capture");
     capture.port.onmessage = (event: MessageEvent<{ pcm: Int16Array; level: number }>) =>
       this.onFrame(event.data.pcm, event.data.level);
-    context.createMediaStreamSource(this.stream).connect(capture);
+    const microphone = context.createMediaStreamSource(this.stream);
+    microphone.connect(capture);
+    this.input = context.createAnalyser();
+    this.input.fftSize = 2048;
+    this.input.smoothingTimeConstant = 0.8;
+    microphone.connect(this.input);
     // A silent sink keeps the capture node pulled by the audio graph.
     const sink = context.createGain();
     sink.gain.value = 0;
@@ -166,6 +181,7 @@ export class VoiceSession {
     this.context = null;
     this.capture = null;
     this.player = null;
+    this.input = null;
     this.inSpeech = false;
     this.setPhase("off");
   }
@@ -176,11 +192,34 @@ export class VoiceSession {
     if (spoken !== "") this.player?.speak(spoken);
   }
 
+  /**
+   * This frame's levels (0..1) and the microphone's and the reply's spectrum and waveform, in the
+   * shape Presence's wave (presence/callwave.js) reads; null while voice is off.
+   */
+  analysis(): {
+    readonly levels: { readonly input: number; readonly output: number };
+    readonly spectrum: VoiceSession["spectrum"];
+  } | null {
+    const player = this.player;
+    if (this.context === null || this.input === null || player === null) return null;
+    const spectrum = this.spectrum;
+    spectrum.rate = this.context.sampleRate;
+    this.input.getByteFrequencyData(spectrum.input);
+    this.input.getFloatTimeDomainData(spectrum.inputWave);
+    player.analyser.getByteFrequencyData(spectrum.output);
+    player.analyser.getFloatTimeDomainData(spectrum.outputWave);
+    return {
+      levels: { input: Math.min(1, this.micLevel * 3), output: Math.min(1, player.level() * 3) },
+      spectrum,
+    };
+  }
+
   stopSpeaking(): void {
     this.player?.stop();
   }
 
   private onFrame(pcm: Int16Array, level: number): void {
+    this.micLevel = level;
     const player = this.player;
     if (player === null) return;
     const speaking = player.speaking;

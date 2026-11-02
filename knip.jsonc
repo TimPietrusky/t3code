@@ -30,6 +30,7 @@
         // scripts/t3voice.sh starts the phone front door by path.
         "t3voice-phone.mjs",
         "t3voice-phone-build.mjs",
+        "t3voice-presence-sync.mjs",
         "knip-schemas.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",
@@ -101,7 +102,11 @@
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still
       // reports an entire component module when nothing imports it.
-      "ignoreIssues": { "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"] },
+      "ignoreIssues": {
+        "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"],
+        // Presence's bar, copied verbatim (scripts/t3voice-presence-sync.mjs): its exports serve Presence.
+        "src/voice/presence/*.js": ["exports", "nsExports", "duplicates"],
+      },
     },
     "apps/marketing": {
       // `astro check` runs from the typecheck task in vite.config.ts, which knip does not read.

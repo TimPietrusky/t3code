@@ -159,6 +159,8 @@ export default defineConfig({
     ignorePatterns: [
       ".repos/**",
       "infra/task-cache/vendor/**",
+      // Presence's bar, copied verbatim by scripts/t3voice-presence-sync.mjs.
+      "apps/web/src/voice/presence/**",
       // Macroscope requires one glob per line; Markdown formatting corrupts it.
       ".macroscope/ignore.md",
       ".alchemy",
@@ -194,6 +196,8 @@ export default defineConfig({
       ".repos",
       ".repos/**",
       "infra/task-cache/vendor/**",
+      // Presence's bar, copied verbatim by scripts/t3voice-presence-sync.mjs.
+      "apps/web/src/voice/presence/**",
       "dist",
       "dist-electron",
       "node_modules",
